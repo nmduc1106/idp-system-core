@@ -1,0 +1,78 @@
+# ============================
+# IDP System - Master .gitignore
+# ============================
+
+# --- Secrets & Credentials (NEVER commit) ---
+secrets/
+*.pem
+*.key
+*.crt
+
+# --- Environment Files ---
+.env
+.env.*
+!.env.example
+ocr-worker/.env
+api-gateway/.env
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+env/
+*.whl
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# --- Go ---
+api-gateway/tmp/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# --- IDE & Editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# --- OS Files ---
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- Docker Volumes (Local Data) ---
+postgres_data/
+minio_data/
+rabbitmq_data/
+redis_data/
+jaeger_data/
+prometheus_data/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Node (if any tooling uses it) ---
+node_modules/

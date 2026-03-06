@@ -1,0 +1,146 @@
+version: '3.8'
+
+# --- Docker Secrets (API keys stored in files, never in env vars) ---
+secrets:
+  anthropic_api_key:
+    file: ./secrets/anthropic_api_key.txt
+
+networks:
+  idp_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  minio_data:
+  rabbitmq_data:
+  redis_data:
+  prometheus_data:
+
+services:
+  # --- 1. Database ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: idp_postgres
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - idp_network
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- 2. Cache ---
+  redis:
+    image: redis:7-alpine
+    container_name: idp_redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - idp_network
+    ports:
+      - "6379:6379"
+
+  # --- 3. Message Queue ---
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: idp_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - idp_network
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  # --- 4. Storage ---
+  minio:
+    image: minio/minio:latest
+    container_name: idp_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      - idp_network
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  # --- 5. Tracing ---
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: idp_jaeger
+    networks:
+      - idp_network
+    ports:
+      - "16686:16686" # UI
+      - "14268:14268" # Collector HTTP
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    container_name: idp_otel_collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./configs/otel-collector-config.yaml:/etc/otelcol/config.yaml
+    networks:
+      - idp_network
+    ports:
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP HTTP receiver
+    depends_on:
+      - jaeger
+
+  # --- 6. Metrics ---
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: idp_prometheus
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - idp_network
+    ports:
+      - "9090:9090"
+
+  # --- 7. AI / OCR Worker (Python) ---
+  ocr-worker:
+    build:
+      context: ./ocr-worker
+      dockerfile: Dockerfile
+    container_name: idp_ocr_worker
+    secrets:
+      - anthropic_api_key
+    environment:
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@idp_rabbitmq:5672/
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@idp_postgres:5432/${DB_NAME}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
+      - MINIO_SECURE=false
+      - MINIO_BUCKET=documents
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://idp_otel_collector:4317
+      - ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
+    networks:
+      - idp_network
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      postgres:
+        condition: service_started
+      minio:
+        condition: service_started
