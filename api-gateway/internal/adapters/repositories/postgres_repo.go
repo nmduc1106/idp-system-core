@@ -18,13 +18,15 @@ func (r *PostgresRepository) CreateDocument(ctx context.Context, doc *domain.Doc
 	return r.db.WithContext(ctx).Create(doc).Error
 }
 
+// CreateJob persists the Job including its UserID field (ownership is set by the service layer).
 func (r *PostgresRepository) CreateJob(ctx context.Context, job *domain.Job) error {
 	return r.db.WithContext(ctx).Create(job).Error
 }
 
-func (r *PostgresRepository) GetJobByID(ctx context.Context, id string) (*domain.Job, error) {
+// GetJobByID returns a job only if it belongs to the requesting user (data isolation).
+func (r *PostgresRepository) GetJobByID(ctx context.Context, id string, userID string) (*domain.Job, error) {
 	var job domain.Job
-	if err := r.db.WithContext(ctx).First(&job, "id = ?", id).Error; err != nil {
+	if err := r.db.WithContext(ctx).First(&job, "id = ? AND user_id = ?", id, userID).Error; err != nil {
 		return nil, err
 	}
 	return &job, nil

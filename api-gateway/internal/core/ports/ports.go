@@ -14,7 +14,7 @@ import (
 type DocumentRepository interface {
 	CreateDocument(ctx context.Context, doc *domain.Document) error
 	CreateJob(ctx context.Context, job *domain.Job) error
-	GetJobByID(ctx context.Context, id string) (*domain.Job, error)
+	GetJobByID(ctx context.Context, id string, userID string) (*domain.Job, error)
 }
 
 // FileStorage: Giao tiếp với MinIO/S3
@@ -31,5 +31,5 @@ type QueueProducer interface {
 type IDPService interface {
 	// UploadDocument: Nhận userID từ Handler
 	UploadDocument(ctx context.Context, userID uuid.UUID, filename string, fileSize int64, fileStream io.Reader, contentType string) (*domain.Job, error)
-	GetJobStatus(ctx context.Context, jobID string) (*domain.Job, error)
+	GetJobStatus(ctx context.Context, userID uuid.UUID, jobID string) (*domain.Job, error)
 }

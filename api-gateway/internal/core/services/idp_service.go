@@ -63,6 +63,7 @@ func (s *IDPServiceImpl) UploadDocument(ctx context.Context, userID uuid.UUID, f
 	// Tạo Job
 	job := &domain.Job{
 		ID:         jobID,
+		UserID:     userID,
 		DocumentID: docID,
 		State:      "PENDING",
 		RetryCount: 0,
@@ -82,6 +83,6 @@ func (s *IDPServiceImpl) UploadDocument(ctx context.Context, userID uuid.UUID, f
 	return job, nil
 }
 
-func (s *IDPServiceImpl) GetJobStatus(ctx context.Context, jobID string) (*domain.Job, error) {
-	return s.repo.GetJobByID(ctx, jobID)
+func (s *IDPServiceImpl) GetJobStatus(ctx context.Context, userID uuid.UUID, jobID string) (*domain.Job, error) {
+	return s.repo.GetJobByID(ctx, jobID, userID.String())
 }

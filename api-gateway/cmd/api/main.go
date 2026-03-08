@@ -19,13 +19,12 @@ import (
 	"idp-api-gateway/internal/adapters/handlers"
 	"idp-api-gateway/internal/adapters/middlewares"
 	"idp-api-gateway/internal/adapters/queue"
-	
-	// Import package repositories (chứa cả UserRepo và DocRepo)
-	"idp-api-gateway/internal/adapters/repositories" 
-	
+	"idp-api-gateway/internal/adapters/repositories"
 	"idp-api-gateway/internal/adapters/storage"
+	"idp-api-gateway/internal/core/domain"
 	"idp-api-gateway/internal/core/pkg/tracing"
 	"idp-api-gateway/internal/core/services"
+
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
@@ -48,26 +47,46 @@ func main() {
 	}()
 
 	// --- CẤU HÌNH ---
-	// Key này dùng để ký và giải mã Token
-	jwtSecret := "my_super_secret_key_change_me"
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "my_super_secret_key_change_me" // Fallback cho dev
+	}
 
-	// 1. Setup Database Connection
-	dsn := "host=localhost user=idp_user password=secret_password dbname=idp_db port=5432 sslmode=disable"
+	// 1. Setup Database Connection (Lấy từ Env do Docker cung cấp)
+	dsn := os.Getenv("DB_DSN")
+	if dsn == "" {
+		// Dùng cho chạy localhost ngoài Docker
+		dsn = "host=localhost user=idp_user password=secret_password dbname=idp_db port=5432 sslmode=disable"
+	}
+	
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatal("❌ Failed to connect to DB:", err)
 	}
 
+	// Auto-migrate: Đăng ký đầy đủ 3 model chính
+	if err := db.AutoMigrate(&domain.User{}, &domain.Document{}, &domain.Job{}); err != nil {
+		log.Fatal("❌ Failed to auto-migrate database schema:", err)
+	}
+	log.Println("✅ Database schema migrated successfully")
+
 	// 2. Setup MinIO Connection
-	minioClient, err := minio.New("localhost:9000", &minio.Options{
-		Creds:  credentials.NewStaticV4("minio_admin", "minio_secret_key", ""),
+	minioEndpoint := os.Getenv("MINIO_ENDPOINT")
+	if minioEndpoint == "" {
+		minioEndpoint = "localhost:9000"
+	}
+	minioUser := os.Getenv("MINIO_ACCESS_KEY")
+	minioPass := os.Getenv("MINIO_SECRET_KEY")
+
+	minioClient, err := minio.New(minioEndpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(minioUser, minioPass, ""),
 		Secure: false,
 	})
 	if err != nil {
 		log.Fatal("❌ Failed to connect to MinIO:", err)
 	}
 
-	// 3. Setup RabbitMQ (Self-Healing Producer)
+	// 3. Setup RabbitMQ
 	amqpURL := os.Getenv("RABBITMQ_URL")
 	if amqpURL == "" {
 		amqpURL = "amqp://guest:guest@localhost:5672/"
@@ -75,37 +94,29 @@ func main() {
 	queueProducer := queue.NewRabbitMQProducer(amqpURL)
 	defer queueProducer.Close()
 
-	// --- 4. KHỞI TẠO MODULE AUTHENTICATION (Mới) ---
-	// Lấy *sql.DB từ Gorm để truyền vào UserRepo
+	// --- 4. KHỞI TẠO MODULE AUTHENTICATION ---
 	sqlDB, _ := db.DB()
-	
-	// [ĐÃ SỬA] Dùng 'repositories' thay vì 'repoPostgres'
-	userRepo := repositories.NewUserRepository(sqlDB) 
-	
-	authService := services.NewAuthService(userRepo, jwtSecret) // Service xử lý đăng nhập/đăng ký
-	authHandler := handlers.NewAuthHandler(authService)         // API Handler cho Auth
+	userRepo := repositories.NewUserRepository(sqlDB)
+	authService := services.NewAuthService(userRepo, jwtSecret)
+	authHandler := handlers.NewAuthHandler(authService)
 
-	// --- 5. KHỞI TẠO MODULE DOCUMENT (Cũ) ---
+	// --- 5. KHỞI TẠO MODULE DOCUMENT ---
 	docRepo := repositories.NewPostgresRepository(db)
 	fileStorage := storage.NewMinIOStorage(minioClient)
-
-
 	idpService := services.NewIDPService(docRepo, fileStorage, queueProducer)
 	httpHandler := handlers.NewHTTPHandler(idpService)
 
 	// --- 6. SETUP ROUTER ---
 	r := gin.Default()
-
-	// Add OpenTelemetry Gin Middleware
 	r.Use(otelgin.Middleware("api-gateway"))
 
 	// Swagger
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	// API Routes Group
+	// API Routes
 	v1 := r.Group("/api/v1")
 	{
-		// A. Public Routes (Ai cũng gọi được)
+		// Public
 		auth := v1.Group("/auth")
 		{
 			auth.POST("/register", authHandler.Register)
@@ -113,11 +124,10 @@ func main() {
 			auth.POST("/logout", authHandler.Logout)
 		}
 
-		// B. Protected Routes (Phải có Token mới gọi được)
-		// Gắn "Người bảo vệ" (Middleware) vào đây
+		// Protected
 		protected := v1.Group("/", middlewares.JWTMiddleware(jwtSecret))
 		{
-			protected.POST("/upload", httpHandler.Upload) // Upload an toàn
+			protected.POST("/upload", httpHandler.Upload)
 			protected.GET("/jobs/:id", httpHandler.GetJob)
 
 			users := protected.Group("/users")
@@ -127,12 +137,17 @@ func main() {
 		}
 	}
 
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
 	fmt.Println("---------------------------------------------------------")
-	fmt.Println("🚀 API Gateway running on :8080 (With JWT Auth)")
-	fmt.Println("📄 Swagger Docs: http://localhost:8080/swagger/index.html")
+	fmt.Println("🚀 API Gateway running on :" + port + " (With JWT Auth)")
+	fmt.Println("📄 Swagger Docs: http://localhost:" + port + "/swagger/index.html")
 	fmt.Println("---------------------------------------------------------")
-	
-	if err := r.Run(":8080"); err != nil {
+
+	if err := r.Run(":" + port); err != nil {
 		log.Fatal("❌ Server shutdown:", err)
 	}
 }
