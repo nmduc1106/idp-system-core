@@ -161,6 +161,7 @@ services:
       - MINIO_BUCKET=documents
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://idp_otel_collector:4317
       - ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
+      - REDIS_URL=redis://redis:6379/0
     networks:
       - idp_network
     depends_on:

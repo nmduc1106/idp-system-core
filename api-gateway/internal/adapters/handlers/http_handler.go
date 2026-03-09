@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
 	"idp-api-gateway/internal/core/ports"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -110,4 +112,70 @@ func (h *HTTPHandler) GetJob(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, job)
+}
+
+// StreamJob godoc
+// @Summary      Stream Job Status (SSE)
+// @Description  Subscribe to Server-Sent Events for real-time job updates.
+// @Tags         jobs
+// @Security     BearerAuth
+// @Produce      text/event-stream
+// @Param        id path string true "Job ID (UUID)"
+// @Success      200 {string} string "Event stream"
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      404 {object} map[string]string "Job not found"
+// @Router       /api/v1/jobs/{id}/stream [get]
+func (h *HTTPHandler) StreamJob(c *gin.Context) {
+	// 1. Extract UserID from Context
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: Missing User Context"})
+		return
+	}
+	userID := userIDVal.(uuid.UUID)
+	jobID := c.Param("id")
+
+	// 2. Get SSE Channel from Service (Verifies ownership internally)
+	msgChan, err := h.service.StreamJobStatus(c.Request.Context(), userID, jobID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job not found or unauthorized"})
+		return
+	}
+
+	// 3. Set SSE Headers
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("Transfer-Encoding", "chunked")
+
+	// 4. Stream Event using Gin's Stream
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case msg, ok := <-msgChan:
+			if !ok {
+				return false // Channel closed
+			}
+
+			// Clean the Double-Encoded JSON from Python
+			var payload map[string]interface{}
+			if err := json.Unmarshal([]byte(msg), &payload); err == nil {
+				// Parse the nested "result" string if it exists
+				if resultStr, ok := payload["result"].(string); ok {
+					var rawResult json.RawMessage
+					if json.Unmarshal([]byte(resultStr), &rawResult) == nil {
+						payload["result"] = rawResult
+					}
+				}
+				// Send the cleaned JSON
+				c.SSEvent("message", payload)
+			} else {
+				// Fallback to raw string if unmarshal fails
+				c.SSEvent("message", msg)
+			}
+
+			return false // Return false to close the stream after the first message
+		case <-c.Request.Context().Done():
+			return false // Client disconnected
+		}
+	})
 }

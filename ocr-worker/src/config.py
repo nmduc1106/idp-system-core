@@ -32,6 +32,9 @@ class Config:
     # --- Database (SQLAlchemy URL) ---
     DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://idp_user:secret_password@localhost:5432/idp_db")
 
+    # --- Redis ---
+    REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
     # --- MinIO ---
     MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 

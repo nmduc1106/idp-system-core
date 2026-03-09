@@ -4,6 +4,7 @@ import signal
 import sys
 import threading
 import pika
+import redis
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from src.config import Config
 from src.database import update_job_status, get_document_path
@@ -62,6 +63,12 @@ class RabbitMQConsumer:
         self.connection = None
         self.channel = None
         self.processor = OCRProcessor() # Gọi Singleton
+        self.redis_client = None
+        try:
+            self.redis_client = redis.from_url(Config.REDIS_URL)
+            logger.info("redis_connected")
+        except Exception as e:
+            logger.error("redis_connection_failed", error=str(e))
 
     def connect(self):
         """Kết nối RabbitMQ với cơ chế Retry vô hạn"""
@@ -129,6 +136,19 @@ class RabbitMQConsumer:
 
                 # C. Update Thành công
                 update_job_status(job_id, "COMPLETED", result=result)
+                
+                # Publish to Redis for SSE
+                if self.redis_client:
+                    try:
+                        payload = json.dumps({
+                            "job_id": job_id,
+                            "status": "COMPLETED",
+                            "result": result
+                        })
+                        self.redis_client.publish(f"job_status:{job_id}", payload)
+                    except Exception as redis_err:
+                        logger.error("redis_publish_failed", error=str(redis_err))
+
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 logger.info("job_completed", job_id=job_id)
 
@@ -140,6 +160,18 @@ class RabbitMQConsumer:
                 # Xử lý lỗi: Cập nhật DB là FAILED
                 if 'job_id' in locals():
                     update_job_status(job_id, "FAILED", error=str(e))
+                    
+                    # Publish to Redis for SSE
+                    if self.redis_client:
+                        try:
+                            payload = json.dumps({
+                                "job_id": job_id,
+                                "status": "FAILED",
+                                "error_message": str(e)
+                            })
+                            self.redis_client.publish(f"job_status:{job_id}", payload)
+                        except Exception as redis_err:
+                            logger.error("redis_publish_failed", error=str(redis_err))
                 
                 # Reject message (Không requeue để tránh lặp vô tận)
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)

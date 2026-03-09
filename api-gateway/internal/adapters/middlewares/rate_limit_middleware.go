@@ -10,8 +10,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// RedisClient defines the interface required by RateLimitMiddleware
+type RedisClient interface {
+	Incr(ctx context.Context, key string) *redis.IntCmd
+	Expire(ctx context.Context, key string, expiration time.Duration) *redis.BoolCmd
+}
+
 // RateLimitMiddleware applies rate limiting using a Redis counter.
-func RateLimitMiddleware(redisClient *redis.Client, limit int, window time.Duration) gin.HandlerFunc {
+func RateLimitMiddleware(redisClient RedisClient, limit int, window time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Extract userID from context (set by JWTMiddleware)
 		userID, exists := c.Get("userID")

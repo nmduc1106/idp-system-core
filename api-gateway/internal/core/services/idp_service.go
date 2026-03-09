@@ -16,13 +16,15 @@ type IDPServiceImpl struct {
 	repo    ports.DocumentRepository
 	storage ports.FileStorage
 	queue   ports.QueueProducer
+	pubsub  ports.PubSubClient
 }
 
-func NewIDPService(repo ports.DocumentRepository, storage ports.FileStorage, queue ports.QueueProducer) *IDPServiceImpl {
+func NewIDPService(repo ports.DocumentRepository, storage ports.FileStorage, queue ports.QueueProducer, pubsub ports.PubSubClient) *IDPServiceImpl {
 	return &IDPServiceImpl{
 		repo:    repo,
 		storage: storage,
 		queue:   queue,
+		pubsub:  pubsub,
 	}
 }
 
@@ -85,4 +87,16 @@ func (s *IDPServiceImpl) UploadDocument(ctx context.Context, userID uuid.UUID, f
 
 func (s *IDPServiceImpl) GetJobStatus(ctx context.Context, userID uuid.UUID, jobID string) (*domain.Job, error) {
 	return s.repo.GetJobByID(ctx, jobID, userID.String())
+}
+
+// StreamJobStatus verifies ownership and subscribes to real-time Redis updates
+func (s *IDPServiceImpl) StreamJobStatus(ctx context.Context, userID uuid.UUID, jobID string) (<-chan string, error) {
+	// 1. Verify ownership first
+	_, err := s.repo.GetJobByID(ctx, jobID, userID.String())
+	if err != nil {
+		return nil, fmt.Errorf("job not found or unauthorized: %w", err)
+	}
+
+	// 2. Subscribe to Redis PubSub
+	return s.pubsub.SubscribeJobStatus(ctx, jobID)
 }

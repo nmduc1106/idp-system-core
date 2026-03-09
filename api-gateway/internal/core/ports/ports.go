@@ -27,9 +27,15 @@ type QueueProducer interface {
 	PublishJob(ctx context.Context, jobID string, docID string) error
 }
 
+// PubSubClient: Giao tiếp với Redis Pub/Sub (Real-time SSE)
+type PubSubClient interface {
+	SubscribeJobStatus(ctx context.Context, jobID string) (<-chan string, error)
+}
+
 // IDPService: Interface chính cho Handler gọi vào
 type IDPService interface {
 	// UploadDocument: Nhận userID từ Handler
 	UploadDocument(ctx context.Context, userID uuid.UUID, filename string, fileSize int64, fileStream io.Reader, contentType string) (*domain.Job, error)
 	GetJobStatus(ctx context.Context, userID uuid.UUID, jobID string) (*domain.Job, error)
+	StreamJobStatus(ctx context.Context, userID uuid.UUID, jobID string) (<-chan string, error)
 }

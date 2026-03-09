@@ -122,7 +122,7 @@ func main() {
 	// --- 5. KHỞI TẠO MODULE DOCUMENT ---
 	docRepo := repositories.NewPostgresRepository(db)
 	fileStorage := storage.NewMinIOStorage(minioClient)
-	idpService := services.NewIDPService(docRepo, fileStorage, queueProducer)
+	idpService := services.NewIDPService(docRepo, fileStorage, queueProducer, redisClient)
 	httpHandler := handlers.NewHTTPHandler(idpService)
 
 	// --- 6. SETUP ROUTER ---
@@ -148,6 +148,7 @@ func main() {
 		{
 			protected.POST("/upload", middlewares.RateLimitMiddleware(redisClient, 10, time.Minute), httpHandler.Upload)
 			protected.GET("/jobs/:id", httpHandler.GetJob)
+			protected.GET("/jobs/:id/stream", httpHandler.StreamJob)
 
 			users := protected.Group("/users")
 			{
