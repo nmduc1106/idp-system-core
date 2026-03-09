@@ -6,7 +6,7 @@ An enterprise-grade, microservices-based Document Processing System that leverag
 
 The system is built with a highly resilient, asynchronous event-driven architecture:
 
-1. **API Gateway (Golang):** Provides high-performance REST APIs for file uploads and status polling. Includes self-healing RabbitMQ connection management.
+1. **API Gateway (Golang):** Provides high-performance REST APIs for file uploads and status polling. Includes self-healing RabbitMQ connection management, **Redis-based Rate Limiting and strict Data Ownership isolation.**
 2. **Message Broker (RabbitMQ):** Decouples ingestion from processing, ensuring no jobs are lost during traffic spikes.
 3. **OCR AI Worker (Python):** Consumes messages, fetches files from MinIO, encodes them to Base64, and uses **Anthropic Claude Vision API** with strict Pydantic schemas for zero-hallucination data extraction.
 4. **Storage & DB:** MinIO (S3-compatible) for object storage and PostgreSQL for job state management.

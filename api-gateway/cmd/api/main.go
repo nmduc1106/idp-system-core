@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/joho/godotenv"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/driver/postgres"
@@ -16,6 +18,7 @@ import (
 
 	_ "idp-api-gateway/docs"
 
+	"idp-api-gateway/internal/adapters/cache"
 	"idp-api-gateway/internal/adapters/handlers"
 	"idp-api-gateway/internal/adapters/middlewares"
 	"idp-api-gateway/internal/adapters/queue"
@@ -35,6 +38,9 @@ import (
 // @in header
 // @name Authorization
 func main() {
+	if err := godotenv.Load("../.env"); err != nil {
+        log.Println("⚠️ Không tìm thấy file .env (Sẽ sử dụng biến môi trường của OS/Docker)")
+    }
 	// --- 0. Setup Tracing ---
 	tp, err := tracing.InitTracer()
 	if err != nil {
@@ -75,8 +81,17 @@ func main() {
 	if minioEndpoint == "" {
 		minioEndpoint = "localhost:9000"
 	}
+	
+	// Thêm Fallback cho User & Pass khi chạy local
 	minioUser := os.Getenv("MINIO_ACCESS_KEY")
+	if minioUser == "" {
+		minioUser = "minio_admin"
+	}
+	
 	minioPass := os.Getenv("MINIO_SECRET_KEY")
+	if minioPass == "" {
+		minioPass = "minio_secret_key"
+	}
 
 	minioClient, err := minio.New(minioEndpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(minioUser, minioPass, ""),
@@ -93,6 +108,10 @@ func main() {
 	}
 	queueProducer := queue.NewRabbitMQProducer(amqpURL)
 	defer queueProducer.Close()
+
+	// Setup Redis Cache
+	redisClient := cache.NewRedisClient()
+	defer redisClient.Close()
 
 	// --- 4. KHỞI TẠO MODULE AUTHENTICATION ---
 	sqlDB, _ := db.DB()
@@ -127,7 +146,7 @@ func main() {
 		// Protected
 		protected := v1.Group("/", middlewares.JWTMiddleware(jwtSecret))
 		{
-			protected.POST("/upload", httpHandler.Upload)
+			protected.POST("/upload", middlewares.RateLimitMiddleware(redisClient, 10, time.Minute), httpHandler.Upload)
 			protected.GET("/jobs/:id", httpHandler.GetJob)
 
 			users := protected.Group("/users")

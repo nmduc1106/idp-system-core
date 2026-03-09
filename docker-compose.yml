@@ -99,6 +99,8 @@ services:
       - idp_network
     depends_on:
       - jaeger
+    ports:                  # <--- THÊM DÒNG NÀY
+      - "4317:4317"         # <--- THÊM DÒNG NÀY (Cổng gRPC cho Tracing)
 
   prometheus:
     image: prom/prometheus:latest

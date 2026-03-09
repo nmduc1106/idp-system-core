@@ -7,6 +7,8 @@ This service is the API Gateway for the Intelligent Document Processing (IDP) Mi
 *   **Language:** Go 1.25.6
 *   **Web Framework:** [Gin-Gonic] (High-performance HTTP routing)
 *   **Authentication:** `golang-jwt/v5` & `golang.org/x/crypto/bcrypt`
+*   **Config Management:** `github.com/joho/godotenv`
+*   **Cache & Rate Limiting:** `github.com/redis/go-redis/v9`
 *   **Database ORM:** [GORM] with PostgreSQL driver
 *   **Message Broker Client:** `amqp091-go` (RabbitMQ)
 *   **Object Storage Client:** `minio-go/v7`
@@ -15,6 +17,8 @@ This service is the API Gateway for the Intelligent Document Processing (IDP) Mi
 
 ## Key Features
 *   **Robust Authentication & Authorization:** Implements secure user registration (bcrypt password hashing) and login using Stateless JWT tokens. To prevent cross-site scripting (XSS) vulnerabilities, JWT tokens are securely delivered via `HttpOnly` and `Secure` cookies. A robust fallback mechanism dynamically parsing the `Authorization: Bearer <token>` header is also integrated to natively support mobile applications and third-party API clients.
+*   **Data Isolation & Ownership:** Jobs and Documents are strictly bound to the authenticated JWT `UserID`, enforcing data isolation.
+*   **API Rate Limiting:** A Redis-backed middleware enforces API rate limits (e.g., throttling uploads to 10 req/min/user), ensuring fair usage and protecting the expensive downstream AI Worker resources.
 *   **High Performance Routing:** Built on the lightweight Gin framework, the service effortlessly handles concurrent requests with a minimal memory footprint.
 *   **Distributed Tracing:** Fully instrumented with OpenTelemetry. The Gateway injects trace context into HTTP requests (`otelgin.Middleware`) and RabbitMQ message headers (`otel.GetTextMapPropagator()`), enabling precise end-to-end tracing across the microservices ecosystem.
 *   **Asynchronous Processing Flow:** Acts as the primary **Producer** for document processing tasks. It securely uploads incoming documents to MinIO and subsequently pushes the Job context downstream via RabbitMQ for asynchronous distributed worker consumption.
@@ -33,6 +37,7 @@ sequenceDiagram
     Client->>APIGateway: POST /api/v1/upload (File + Token)
     activate APIGateway
     APIGateway->>APIGateway: Validate JWT (Cookie or Header)
+    APIGateway->>APIGateway: Redis Rate Limit Check (Throttling)
     APIGateway->>MinIO: Stream UploadFile()
     MinIO-->>APIGateway: Upload Success
     APIGateway->>DB: CreateDocument() (Metadata)
@@ -113,7 +118,8 @@ The project architecture strictly adheres to **Clean Architecture** patterns, en
 *   `internal/core/services/`: Houses the complex core business logic isolating it from external frameworks (`auth_service.go`, `idp_service.go`).
 *   `internal/core/pkg/tracing/`: Abstractions for OpenTelemetry initialization and configurations.
 *   `internal/adapters/handlers/`: Contains the HTTP controllers (`auth_handler.go`, `http_handler.go`) designed to parse requests and trigger service logic.
-*   `internal/adapters/middlewares/`: Implements the `JWTMiddleware` capable of Token extraction (Cookie/Header) and payload verification.
+*   `internal/adapters/middlewares/`: Implements the `JWTMiddleware` capable of Token extraction (Cookie/Header) and payload verification, and `rate_limit_middleware.go` for Redis throttling.
 *   `internal/adapters/repositories/`: Implements the `UserRepository` and `DocumentRepository` interfaces translating operations into precise GORM/Postgres SQL queries.
 *   `internal/adapters/queue/`: Implements `RabbitMQProducer`, translating application jobs into RabbitMQ AMQP publications.
 *   `internal/adapters/storage/`: Implements `MinIOStorage`, providing an S3 compatible layer for saving uploaded files.
+*   `internal/adapters/cache/`: Contains the initialization logic for the Redis client (`redis_client.go`).

@@ -36,8 +36,7 @@ The IDP ecosystem is a distributed microservices platform designed to **ingest, 
 
 The system is composed of two primary service layers:
 
-- **Ingestion & API Layer (Go)** — A high-performance API Gateway responsible for authentication, file upload, metadata persistence, and job publishing.
-- **AI & Processing Layer (Python)** — An event-driven OCR Worker that consumes processing jobs, applies image pre-processing via OpenCV, and extracts text via Tesseract OCR.
+- **AI & Processing Layer (Python)** — An event-driven OCR Worker that consumes processing jobs, applies Base64 encoding, and extracts structured JSON data using a Multimodal LLM (Anthropic Claude Vision) mapped via Pydantic.
 
 All services are interconnected through a shared infrastructure layer comprising PostgreSQL, MinIO, RabbitMQ, and Redis, with end-to-end distributed tracing via OpenTelemetry.
 
@@ -84,9 +83,9 @@ graph TD
     %% Worker Layer (Python)
     subgraph "AI & Processing Layer (Python)"
         Worker[OCR Worker]
-        OpenCV[OpenCV Pre-processor]
-        Tesseract[Tesseract OCR Engine]
-        Worker --> OpenCV --> Tesseract
+        Encoder[Base64 Encoder]
+        Claude[Claude Vision API + Pydantic]
+        Worker --> Encoder --> Claude
     end
 
     %% Observability Layer
@@ -119,7 +118,7 @@ graph TD
 | Service             | Language | Role                                          | Port(s)        |
 |---------------------|----------|-----------------------------------------------|----------------|
 | **API Gateway**     | Go       | HTTP ingestion, authentication, job publishing | `8080`         |
-| **OCR Worker**      | Python   | Document pre-processing and OCR extraction     | — (consumer)   |
+| **OCR Worker**      | Python   | Document Base64 encoding and Claude AI Vision extraction | — (consumer)   |
 | **PostgreSQL**      | —        | Relational metadata and result storage         | `5432`         |
 | **Redis**           | —        | Caching layer                                  | `6379`         |
 | **RabbitMQ**        | —        | Asynchronous message broker                    | `5672`, `15672` |
@@ -141,7 +140,7 @@ graph TD
 
 ### 5.2 Redis
 
-- **Purpose:** Caching layer for frequently accessed data and rate-limiting support.
+- **Purpose:** Actively used for Gateway API Rate Limiting (Fixed Window Counter, e.g., 10 req/min/user) to protect downstream AI workers.
 - **Image:** `redis:7-alpine`
 - **Persistence:** Append-only file (AOF) enabled for durability.
 
@@ -177,10 +176,11 @@ The document processing pipeline follows a sequential, event-driven flow:
 
 1. The OCR Worker consumes job messages from the **RabbitMQ** queue.
 2. The raw document file is downloaded from **MinIO**.
-3. **OpenCV** pre-processing is applied (grayscale conversion, noise reduction, thresholding, deskewing).
-4. **Tesseract OCR** engine extracts text from the pre-processed image.
-5. Extracted text and structured JSON results are written back to **PostgreSQL**.
-6. Document status is updated to `completed` (or `failed` on error).
+3. The document is converted into a **Base64 string** via a Base64 Encoder.
+4. An extraction prompt and the Base64 image are sent to the **Anthropic Claude Vision API**.
+5. The LLM response is parsed and validated into strict structured JSON using **Pydantic**.
+6. Extracted structured JSON results are written back to **PostgreSQL**.
+7. Document status is updated to `completed` (or `failed` on error).
 
 ### 6.3 Trace Context Propagation
 
@@ -242,6 +242,7 @@ Prometheus is configured via `configs/prometheus.yml` and stores time-series dat
 
 ### 9.3 Backpressure Management
 
+- **Gateway Rate Limiting**: The Go API Gateway enforces strict Redis-backed Rate Limiting (Fixed Window Counter, 10 req/min) preventing abuse of the expensive Anthropic Claude downstream processing.
 - RabbitMQ `prefetch_count` is configured on the OCR Worker to limit the number of in-flight messages per consumer, preventing overload under high job volume.
 - Queue depth metrics are exposed to Prometheus, enabling auto-scaling triggers based on queue backlog.
 
