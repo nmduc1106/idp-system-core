@@ -46,7 +46,7 @@ func JWTMiddleware(secret string) gin.HandlerFunc {
 			return
 		}
 
-		// 3. Lấy UserID từ Token và gán vào Context
+		// 3. Lấy UserID và Role từ Token và gán vào Context
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			userIDStr := claims["user_id"].(string)
 			// Parse UUID để đảm bảo đúng định dạng
@@ -54,6 +54,11 @@ func JWTMiddleware(secret string) gin.HandlerFunc {
 			if err == nil {
 				// QUAN TRỌNG: Gán ID thật vào context để các hàm sau dùng
 				c.Set("userID", userID)
+			}
+
+			// Extract Role for RBAC
+			if role, ok := claims["role"].(string); ok {
+				c.Set("role", role)
 			}
 		}
 

@@ -91,7 +91,7 @@ func (h *HTTPHandler) Upload(c *gin.Context) {
 // @Security     BearerAuth
 // @Produce      json
 // @Param        id path string true "Job ID (UUID)"
-// @Success      200 {object} domain.Job
+// @Success      200 {object} map[string]interface{}
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      404 {object} map[string]string "Job not found"
 // @Router       /api/v1/jobs/{id} [get]

@@ -1,18 +1,17 @@
 definitions:
-  domain.Job:
+  domain.User:
     properties:
       created_at:
         type: string
-      document_id:
+      email:
+        type: string
+      full_name:
         type: string
       id:
         type: string
-      result:
-        description: 'SỬA DÒNG DƯỚI ĐÂY: Thêm dấu * trước string'
+      role:
         type: string
-      retry_count:
-        type: integer
-      state:
+      updated_at:
         type: string
     type: object
   handlers.LoginRequest:
@@ -49,6 +48,8 @@ definitions:
         type: string
       id:
         type: string
+      role:
+        type: string
       updated_at:
         type: string
     type: object
@@ -58,11 +59,83 @@ info:
   title: IDP API Gateway
   version: "1.0"
 paths:
+  /api/v1/admin/jobs:
+    get:
+      description: Returns all jobs with associated user info ordered by created_at
+        DESC. ADMIN only.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of all jobs
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get All Jobs
+      tags:
+      - admin
+  /api/v1/admin/stats:
+    get:
+      description: Returns total users, total jobs, and job counts grouped by state.
+        ADMIN only.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: System statistics
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get System Statistics
+      tags:
+      - admin
+  /api/v1/admin/users:
+    get:
+      description: Returns all registered users (passwords excluded). ADMIN only.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of all users
+          schema:
+            items:
+              $ref: '#/definitions/domain.User'
+            type: array
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get All Users
+      tags:
+      - admin
   /api/v1/auth/login:
     post:
       consumes:
       - application/json
-      description: Authenticate user and return JWT Token.
+      description: Authenticate user and set HttpOnly cookies (access_token 15m +
+        refresh_token 7d).
       parameters:
       - description: Login Info
         in: body
@@ -96,7 +169,8 @@ paths:
       - auth
   /api/v1/auth/logout:
     post:
-      description: Logout user and clear JWT cookie.
+      description: Logout user, invalidate refresh token in Redis, and clear all auth
+        cookies.
       produces:
       - application/json
       responses:
@@ -107,6 +181,27 @@ paths:
               type: string
             type: object
       summary: Logout
+      tags:
+      - auth
+  /api/v1/auth/refresh:
+    post:
+      description: Use refresh_token cookie to obtain a new short-lived access_token.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Token refreshed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Invalid or expired refresh token
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Refresh Access Token
       tags:
       - auth
   /api/v1/auth/register:
@@ -159,10 +254,56 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/domain.Job'
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Job not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
       security:
       - BearerAuth: []
       summary: Get Job Status
+      tags:
+      - jobs
+  /api/v1/jobs/{id}/stream:
+    get:
+      description: Subscribe to Server-Sent Events for real-time job updates.
+      parameters:
+      - description: Job ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: Event stream
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Job not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Stream Job Status (SSE)
       tags:
       - jobs
   /api/v1/upload:
@@ -171,7 +312,7 @@ paths:
       - multipart/form-data
       description: Upload a PDF or Image file. Requires Bearer Token.
       parameters:
-      - description: Document file (PDF, PNG, JPG)
+      - description: Document file (PDF, PNG, JPG, TIFF)
         in: formData
         name: file
         required: true
@@ -186,7 +327,7 @@ paths:
               type: string
             type: object
         "400":
-          description: No file uploaded
+          description: No file uploaded or unsupported file type
           schema:
             additionalProperties:
               type: string

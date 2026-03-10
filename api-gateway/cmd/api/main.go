@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -116,7 +117,7 @@ func main() {
 	// --- 4. KHỞI TẠO MODULE AUTHENTICATION ---
 	sqlDB, _ := db.DB()
 	userRepo := repositories.NewUserRepository(sqlDB)
-	authService := services.NewAuthService(userRepo, jwtSecret)
+	authService := services.NewAuthService(userRepo, jwtSecret, redisClient)
 	authHandler := handlers.NewAuthHandler(authService)
 
 	// --- 5. KHỞI TẠO MODULE DOCUMENT ---
@@ -125,8 +126,24 @@ func main() {
 	idpService := services.NewIDPService(docRepo, fileStorage, queueProducer, redisClient)
 	httpHandler := handlers.NewHTTPHandler(idpService)
 
+	// --- 6. KHỞI TẠO MODULE ADMIN ---
+	adminRepo := repositories.NewAdminRepository(db)
+	adminService := services.NewAdminService(adminRepo)
+	adminHandler := handlers.NewAdminHandler(adminService)
+
 	// --- 6. SETUP ROUTER ---
 	r := gin.Default()
+
+	// CORS Middleware - must be before any route definitions
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization", "Accept", "X-Requested-With", "Accept-Version", "Cache-Control"},
+		ExposeHeaders:    []string{"Content-Length", "Content-Type"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
 	r.Use(otelgin.Middleware("api-gateway"))
 
 	// Swagger
@@ -140,7 +157,7 @@ func main() {
 		{
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
-			auth.POST("/logout", authHandler.Logout)
+			auth.POST("/refresh", authHandler.Refresh)
 		}
 
 		// Protected
@@ -149,10 +166,19 @@ func main() {
 			protected.POST("/upload", middlewares.RateLimitMiddleware(redisClient, 10, time.Minute), httpHandler.Upload)
 			protected.GET("/jobs/:id", httpHandler.GetJob)
 			protected.GET("/jobs/:id/stream", httpHandler.StreamJob)
+			protected.POST("/auth/logout", authHandler.Logout)
 
 			users := protected.Group("/users")
 			{
 				users.GET("/me", authHandler.GetMe)
+			}
+
+			// Admin-only routes
+			adminGroup := protected.Group("/admin", middlewares.RequireRole("ADMIN"))
+			{
+				adminGroup.GET("/stats", adminHandler.GetStats)
+				adminGroup.GET("/jobs", adminHandler.GetJobs)
+				adminGroup.GET("/users", adminHandler.GetUsers)
 			}
 		}
 	}

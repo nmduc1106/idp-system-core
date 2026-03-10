@@ -36,4 +36,7 @@ type Job struct {
 	StartedAt    *time.Time      `json:"started_at,omitempty"`
 	FinishedAt   *time.Time      `json:"finished_at,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
+
+	// Association: GORM Preload for Admin queries (constraint:false to skip FK migration)
+	User         *User           `gorm:"foreignKey:UserID;references:ID;constraint:false" json:"user,omitempty"`
 }

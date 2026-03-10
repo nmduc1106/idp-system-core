@@ -39,3 +39,17 @@ type IDPService interface {
 	GetJobStatus(ctx context.Context, userID uuid.UUID, jobID string) (*domain.Job, error)
 	StreamJobStatus(ctx context.Context, userID uuid.UUID, jobID string) (<-chan string, error)
 }
+
+// AdminRepository: Giao tiếp với Database cho Admin queries
+type AdminRepository interface {
+	GetStats(ctx context.Context) (map[string]interface{}, error)
+	GetAllJobsWithUsers(ctx context.Context) ([]domain.Job, error)
+	GetAllUsers(ctx context.Context) ([]domain.User, error)
+}
+
+// AdminService: Interface cho Admin Handler gọi vào
+type AdminService interface {
+	GetSystemStats(ctx context.Context) (map[string]interface{}, error)
+	GetAllJobs(ctx context.Context) ([]domain.Job, error)
+	GetAllUsers(ctx context.Context) ([]domain.User, error)
+}

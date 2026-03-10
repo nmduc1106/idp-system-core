@@ -49,6 +49,21 @@ func (r *RedisClientWrapper) Expire(ctx context.Context, key string, expiration 
 	return r.client.Expire(ctx, key, expiration)
 }
 
+// Set delegates to the underlying redis client (for Auth Token Store)
+func (r *RedisClientWrapper) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd {
+	return r.client.Set(ctx, key, value, expiration)
+}
+
+// Get delegates to the underlying redis client (for Auth Token Store)
+func (r *RedisClientWrapper) Get(ctx context.Context, key string) *redis.StringCmd {
+	return r.client.Get(ctx, key)
+}
+
+// Del delegates to the underlying redis client (for Auth Token Store)
+func (r *RedisClientWrapper) Del(ctx context.Context, keys ...string) *redis.IntCmd {
+	return r.client.Del(ctx, keys...)
+}
+
 // SubscribeJobStatus implements ports.PubSubClient
 func (r *RedisClientWrapper) SubscribeJobStatus(ctx context.Context, jobID string) (<-chan string, error) {
 	channelName := "job_status:" + jobID

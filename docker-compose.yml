@@ -114,7 +114,6 @@ services:
       - "9090:9090"
 
   # --- 6. API Gateway (Go) ---
-  # --- 6. API Gateway (Go) ---
   api-gateway:
     build:
       context: ./api-gateway
