@@ -1,12 +1,22 @@
-# --- Docker Secrets (API keys stored in files) ---
+version: "3.9"
+
+# -----------------------------
+# Docker Secrets
+# -----------------------------
 secrets:
   anthropic_api_key:
     file: ./secrets/anthropic_api_key.txt
 
+# -----------------------------
+# Networks
+# -----------------------------
 networks:
   idp_network:
     driver: bridge
 
+# -----------------------------
+# Volumes
+# -----------------------------
 volumes:
   postgres_data:
   minio_data:
@@ -14,11 +24,18 @@ volumes:
   redis_data:
   prometheus_data:
 
+# -----------------------------
+# Services
+# -----------------------------
 services:
-  # --- 1. Database ---
+
+# =========================================================
+# 1 DATABASE
+# =========================================================
   postgres:
     image: postgres:15-alpine
     container_name: idp_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-idp_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-secret_password}
@@ -31,27 +48,31 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL","pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  # --- 2. Cache ---
+# =========================================================
+# 2 REDIS
+# =========================================================
   redis:
     image: redis:7-alpine
     container_name: idp_redis
+    restart: unless-stopped
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
     networks:
       - idp_network
-    ports:
-      - "6379:6379"
 
-  # --- 3. Message Queue ---
+# =========================================================
+# 3 RABBITMQ
+# =========================================================
   rabbitmq:
     image: rabbitmq:3.12-management-alpine
     container_name: idp_rabbitmq
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
@@ -63,10 +84,13 @@ services:
       - "5672:5672"
       - "15672:15672"
 
-  # --- 4. Storage ---
+# =========================================================
+# 4 MINIO STORAGE
+# =========================================================
   minio:
     image: minio/minio:latest
     container_name: idp_minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_admin}
@@ -79,19 +103,26 @@ services:
       - "9000:9000"
       - "9001:9001"
 
-  # --- 5. Tracing & Metrics ---
+# =========================================================
+# 5 TRACING
+# =========================================================
   jaeger:
     image: jaegertracing/all-in-one:latest
     container_name: idp_jaeger
+    restart: unless-stopped
     networks:
       - idp_network
     ports:
       - "16686:16686"
       - "14268:14268"
 
+# =========================================================
+# 6 OPENTELEMETRY
+# =========================================================
   otel-collector:
     image: otel/opentelemetry-collector:latest
     container_name: idp_otel_collector
+    restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./configs/otel-collector-config.yaml:/etc/otelcol/config.yaml
@@ -99,12 +130,16 @@ services:
       - idp_network
     depends_on:
       - jaeger
-    ports:                  # <--- THÊM DÒNG NÀY
-      - "4317:4317"         # <--- THÊM DÒNG NÀY (Cổng gRPC cho Tracing)
+    ports:
+      - "4317:4317"
 
+# =========================================================
+# 7 PROMETHEUS
+# =========================================================
   prometheus:
     image: prom/prometheus:latest
     container_name: idp_prometheus
+    restart: unless-stopped
     volumes:
       - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -113,58 +148,83 @@ services:
     ports:
       - "9090:9090"
 
-  # --- 6. API Gateway (Go) ---
+# =========================================================
+# 8 API GATEWAY (GO)
+# =========================================================
   api-gateway:
     build:
       context: ./api-gateway
       dockerfile: Dockerfile
     container_name: idp_api_gateway
+    restart: unless-stopped
     env_file:
       - .env
     environment:
-      - DB_DSN=host=postgres user=${DB_USER} password=${DB_PASSWORD} dbname=${DB_NAME} port=5432 sslmode=disable
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672/
-      - MINIO_ENDPOINT=minio:9000
-      # ÉP CỨNG ĐỂ TEST BỎ QUA FILE .ENV:
-      - MINIO_ACCESS_KEY=minio_admin
-      - MINIO_SECRET_KEY=minio_secret_key
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://idp_otel_collector:4318
+
+      DB_DSN: host=postgres user=${DB_USER} password=${DB_PASSWORD} dbname=${DB_NAME} port=5432 sslmode=disable
+
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672/
+
+      REDIS_URL: redis:6379
+
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minio_admin
+      MINIO_SECRET_KEY: minio_secret_key
+
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+
     ports:
       - "8080:8080"
+
     networks:
       - idp_network
+
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_started
+      redis:
+        condition: service_started
 
-  # --- 7. AI / OCR Worker (Python) ---
+# =========================================================
+# 9 OCR WORKER (PYTHON)
+# =========================================================
   ocr-worker:
     build:
       context: ./ocr-worker
       dockerfile: Dockerfile
     container_name: idp_ocr_worker
+    restart: unless-stopped
     env_file:
       - .env
     secrets:
       - anthropic_api_key
     environment:
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672/
-      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
-      - MINIO_ENDPOINT=minio:9000
-      # ÉP CỨNG GIỐNG HỆT API GATEWAY:
-      - MINIO_ACCESS_KEY=minio_admin
-      - MINIO_SECRET_KEY=minio_secret_key
-      - MINIO_SECURE=false
-      - MINIO_BUCKET=documents
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://idp_otel_collector:4317
-      - ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
-      - REDIS_URL=redis://redis:6379/0
+
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672/
+
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+
+      REDIS_URL: redis://redis:6379/0
+
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minio_admin
+      MINIO_SECRET_KEY: minio_secret_key
+      MINIO_SECURE: "false"
+      MINIO_BUCKET: documents
+
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+
+      ANTHROPIC_MODEL: claude-sonnet-4-5-20250929
+
     networks:
       - idp_network
+
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
+        condition: service_started
+      redis:
         condition: service_started
