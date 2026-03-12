@@ -74,5 +74,9 @@ prometheus_data/
 *.log
 logs/
 
-# --- Node (if any tooling uses it) ---
+# --- Node (Frontend) ---
 node_modules/
+frontend/dist/
+frontend/node_modules/
+.env.local
+.env.*.local
