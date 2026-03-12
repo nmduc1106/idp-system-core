@@ -11,6 +11,7 @@ from src.database import update_job_status, get_document_path
 from src.processor import OCRProcessor
 import structlog
 import os
+import requests
 import uuid
 from opentelemetry import trace, propagate
 from opentelemetry.trace.status import Status, StatusCode
@@ -137,6 +138,24 @@ class RabbitMQConsumer:
                 # C. Update Thành công
                 update_job_status(job_id, "COMPLETED", result=result)
                 
+                # --- GỌI WEBHOOK XÓA CACHE KHI THÀNH CÔNG ---
+                try:
+                    webhook_secret = os.environ.get("WEBHOOK_SECRET", "default_secret")
+                    api_url = os.environ.get("API_GATEWAY_URL", "http://api-gateway:8080")
+                    logger.info("sending_webhook", api_url=api_url, job_id=job_id) # LOG thêm để dễ debug
+                    
+                    response = requests.post(
+                        f"{api_url}/internal/webhook/job-completed",
+                        json={"job_id": job_id},
+                        headers={"X-Webhook-Secret": webhook_secret},
+                        timeout=5
+                    )
+                    response.raise_for_status() # Bắn lỗi nếu API trả về 401, 500
+                    logger.info("webhook_sent_success", job_id=job_id)
+                except Exception as wh_err:
+                    logger.error("webhook_sent_failed", error=str(wh_err))
+                # ----------------------------------------
+                
                 # Publish to Redis for SSE
                 if self.redis_client:
                     try:
@@ -160,6 +179,22 @@ class RabbitMQConsumer:
                 # Xử lý lỗi: Cập nhật DB là FAILED
                 if 'job_id' in locals():
                     update_job_status(job_id, "FAILED", error=str(e))
+                    
+                    # --- GỌI WEBHOOK XÓA CACHE KHI THẤT BẠI ---
+                    try:
+                        webhook_secret = os.environ.get("WEBHOOK_SECRET", "default_secret")
+                        api_url = os.environ.get("API_GATEWAY_URL", "http://api-gateway:8080")
+                        
+                        response = requests.post(
+                            f"{api_url}/internal/webhook/job-completed",
+                            json={"job_id": job_id},
+                            headers={"X-Webhook-Secret": webhook_secret},
+                            timeout=5
+                        )
+                        response.raise_for_status()
+                    except Exception as wh_err:
+                        logger.error("webhook_sent_failed", error=str(wh_err))
+                    # ----------------------------------------
                     
                     # Publish to Redis for SSE
                     if self.redis_client:

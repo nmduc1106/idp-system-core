@@ -162,6 +162,7 @@ services:
     env_file:
       - .env
     environment:
+      WEBHOOK_SECRET: "idp_secure_webhook_key_2026_xYz" 
 
       DB_DSN: host=postgres user=${DB_USER} password=${DB_PASSWORD} dbname=${DB_NAME} port=5432 sslmode=disable
 
@@ -203,6 +204,8 @@ services:
     secrets:
       - anthropic_api_key
     environment:
+      WEBHOOK_SECRET: "idp_secure_webhook_key_2026_xYz"
+      API_GATEWAY_URL: "http://host.docker.internal:8080"
 
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672/
 

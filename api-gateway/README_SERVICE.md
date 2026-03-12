@@ -13,26 +13,23 @@ This service serves as the core API Gateway for the Intelligent Document Process
 | Category | Technology | Description |
 | :--- | :--- | :--- |
 | **Language** | Go 1.25.6 | Core programming language |
-| **Web Framework** | [Gin-Gonic] | High-performance HTTP routing |
+| **Web Framework** | Gin-Gonic | High-performance HTTP routing |
 | **Authentication** | `golang-jwt/v5` & `bcrypt` | Stateless JWT and password hashing |
 | **Config Management** | `godotenv` | Environment variable management |
-| **Cache & Rate Limiting** | `go-redis/v9` | Redis client for throttling |
-| **Database ORM** | [GORM] | Object-Relational Mapping with PostgreSQL driver |
+| **Cache & Rate Limiting** | `go-redis/v9` | Redis client for throttling and Paginated API caching |
+| **Database ORM** | GORM | Object-Relational Mapping with PostgreSQL driver |
 | **Message Broker** | `amqp091-go` | RabbitMQ client for async task queuing |
 | **Object Storage** | `minio-go/v7` | MinIO client for file management |
-| **API Documentation** | `swaggo/gin-swagger` | OpenAPI/Swagger auto-generation |
-| **Observability** | OpenTelemetry | End-to-end tracing (`otel`, `otelgin`, `otlptracegrpc`) |
 
 ---
 
 ## Key Features
 
-*   **Dual-Token Authentication & RBAC:** Implements a short-lived Access Token (15 min, HttpOnly cookie) and a long-lived Refresh Token (7 days, stored in Redis with key `auth:refresh:<user_id>`). The Refresh Token cookie is path-restricted to `/api/v1/auth/refresh` for enhanced security. Supports Role-Based Access Control (RBAC) via a `role` claim embedded in the JWT.
-*   **Data Isolation & Ownership:** Enforces strict data isolation by binding Jobs and Documents directly to the authenticated JWT `UserID`.
-*   **API Rate Limiting:** Utilizes Redis-backed middleware to enforce API rate constraints (e.g., throttling uploads to 10 requests/minute/user), ensuring equitable resource distribution and protecting costly downstream AI workers.
-*   **High-Performance Routing:** Built on the Gin framework, resulting in effortless handling of concurrent HTTP requests with minimal memory overhead.
-*   **Distributed Tracing:** Fully instrumented with OpenTelemetry. Trace contexts are injected into incoming HTTP requests via `otelgin.Middleware` and propagated through RabbitMQ message headers using `otel.GetTextMapPropagator()`, ensuring seamless cross-service observability.
-*   **Asynchronous Processing:** Acts as the primary **Producer** for document processing operations. It securely streams file uploads to MinIO and subsequently publishes the Job context to RabbitMQ for consumption by distributed AI worker nodes.
+* **Dual-Token Authentication & RBAC:** Implements a short-lived Access Token (15 min) and a long-lived Refresh Token (7 days). Supports Role-Based Access Control (RBAC).
+* **High-Speed Pagination & Caching:** The `GET /jobs` APIs utilize a `Cache-Aside` pattern with Redis. Paginated lists are cached for ultra-fast retrieval. 
+* **Webhook Cache Invalidation:** Exposes a secure internal webhook (`/internal/webhook/job-completed`) protected by a shared secret. The Python worker calls this endpoint to instantly invalidate stale Redis caches when a job completes, ensuring real-time data accuracy for the frontend.
+* **API Rate Limiting:** Utilizes Redis-backed middleware to enforce API rate constraints.
+* **Distributed Tracing:** Fully instrumented with OpenTelemetry.
 
 ---
 
@@ -81,14 +78,13 @@ The API Gateway explicitly manages failures in downstream dependencies during th
 
 | Method | Endpoint | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
-| **POST** | `/api/v1/auth/register` | Register a new user account | No |
-| **POST** | `/api/v1/auth/login` | Authenticate and set `access_token` (15m) + `refresh_token` (7d) cookies | No |
-| **POST** | `/api/v1/auth/refresh` | Obtain a new `access_token` using the `refresh_token` cookie | No (Cookie) |
-| **POST** | `/api/v1/auth/logout` | Invalidate refresh token in Redis and clear all auth cookies | Yes |
-| **GET** | `/api/v1/users/me` | Retrieve authenticated user profile (includes `role`) | Yes |
-| **POST** | `/api/v1/upload` | Upload a new document for processing | Yes |
-| **GET** | `/api/v1/jobs/:id` | Poll the status of a processing job | Yes |
+| **POST** | `/api/v1/auth/login` | Authenticate and set cookies | No |
+| **POST** | `/api/v1/upload` | Upload a document (Accepts `file`, `file_code`, `notes`) | Yes |
+| **GET** | `/api/v1/jobs` | Get paginated jobs (`?page=1&limit=10&file_code=XYZ`) | Yes |
 | **GET** | `/api/v1/jobs/:id/stream` | Subscribe to real-time SSE job status updates | Yes |
+| **POST** | `/internal/webhook/job-completed` | Clear Redis Cache for a job (Internal Worker Only) | Shared Secret |
+
+---
 
 ### Example JSON Responses
 
@@ -133,12 +129,8 @@ The API Gateway acts exclusively as a **Producer** in the event-driven architect
 
 ## Configuration & Environments
 
-The application relies on several environment variables (`.env` or injected via Docker context) to establish downstream connections optimally:
-
-*   **PostgreSQL:** `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
-*   **MinIO:** `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`
-*   **RabbitMQ:** `RABBITMQ_USER`, `RABBITMQ_PASS`
-*   **Security:** `JWT_SECRET` (Cryptographically signs stateless payloads)
+* **Database:** `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
+* **Security:** `JWT_SECRET`, `WEBHOOK_SECRET` (Must match Python worker)
 
 ---
 

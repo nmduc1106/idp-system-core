@@ -1,7 +1,7 @@
 # OCR Worker Service
 
 ## Service Overview
-The `ocr-worker` is a critical backend component within the Intelligent Document Processing (IDP) ecosystem. It operates as an asynchronous background worker responsible for consuming document processing jobs from a message queue, downloading raw files from object storage, extracting structured data using a **Multimodal LLM (Anthropic Claude)**, and updating the central database with the final results.
+The `ocr-worker` operates as an asynchronous background worker responsible for consuming document processing jobs from RabbitMQ, extracting structured data using **Anthropic Claude**, updating PostgreSQL, and explicitly triggering **Go API Webhooks** for cache invalidation.
 
 ## Tech Stack
 - **Language:** Python 3.10
@@ -15,38 +15,25 @@ The `ocr-worker` is a critical backend component within the Intelligent Document
   - `structlog` — Structured JSON logging
   - `opentelemetry` — Distributed tracing (OTLP gRPC exporter)
 
+
 ## Asynchronous Processing Pipeline
 
 ```mermaid
 sequenceDiagram
-    participant RMQ as RabbitMQ (ocr_queue)
-    participant Worker as RabbitMQConsumer (worker.py)
-    participant DB as PostgreSQL (database.py)
-    participant MinIO as MinIO Storage
-    participant Claude as Anthropic Claude API
+    participant RMQ as RabbitMQ
+    participant Worker as OCR Worker
+    participant DB as PostgreSQL
+    participant Claude as Claude Vision API
+    participant GoAPI as Go API Gateway
 
-    RMQ->>Worker: Consume Message (job_id, doc_id)
-    activate Worker
+    RMQ->>Worker: Consume Message (job_id)
     Worker->>DB: update_job_status(PROCESSING)
-    Worker->>DB: get_document_path(doc_id)
-    DB-->>Worker: storage_path (object_name)
-    Worker->>Worker: process(object_name)
-    activate Worker
-    Worker->>MinIO: get_object(bucket, object_name)
-    MinIO-->>Worker: file_bytes
-    Worker->>Worker: Base64 Encode image_bytes
-    Worker->>Claude: messages.create(model, system_prompt, base64_image)
-    Claude-->>Worker: JSON string (structured extraction)
-    Worker->>Worker: Pydantic ExtractedData.model_validate()
-    deactivate Worker
+    Worker->>Claude: messages.create(base64_image)
+    Claude-->>Worker: JSON string
     Worker->>DB: update_job_status(COMPLETED, result)
+    Worker->>GoAPI: POST /internal/webhook/job-completed (X-Webhook-Secret)
+    GoAPI-->>Worker: 200 OK (Cache Cleared)
     Worker->>RMQ: basic_ack (Success)
-    deactivate Worker
-
-    %% Error Flow
-    Note over Worker, Claude: On Exception (API error, validation error)
-    Worker->>DB: update_job_status(FAILED, error)
-    Worker->>RMQ: basic_nack (requeue=False)
 ```
 
 ## Multimodal LLM Pipeline (Claude Vision)

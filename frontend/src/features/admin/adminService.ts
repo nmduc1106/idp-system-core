@@ -1,4 +1,5 @@
 import apiClient from '../../utils/apiClient';
+import { PaginatedResponse, DocumentMeta, JobQuery } from '../document/docService';
 
 export interface SystemStats {
     total_users: number;
@@ -24,6 +25,7 @@ export interface AdminJob {
         full_name: string;
         role: string;
     };
+    document?: DocumentMeta;
 }
 
 export interface AdminUser {
@@ -40,8 +42,14 @@ export const getSystemStats = async (): Promise<SystemStats> => {
     return response.data;
 };
 
-export const getAllJobs = async (): Promise<AdminJob[]> => {
-    const response = await apiClient.get<AdminJob[]>('/admin/jobs');
+export const getAllJobs = async (q: JobQuery = {}): Promise<PaginatedResponse<AdminJob>> => {
+    const params = new URLSearchParams();
+    if (q.page) params.append('page', String(q.page));
+    if (q.limit) params.append('limit', String(q.limit));
+    if (q.status) params.append('status', q.status);
+    if (q.file_code) params.append('file_code', q.file_code);
+
+    const response = await apiClient.get<PaginatedResponse<AdminJob>>(`/admin/jobs?${params.toString()}`);
     return response.data;
 };
 

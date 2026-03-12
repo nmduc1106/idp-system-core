@@ -2,6 +2,8 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -96,3 +98,58 @@ func (r *RedisClientWrapper) SubscribeJobStatus(ctx context.Context, jobID strin
 
 	return msgChan, nil
 }
+
+// --- Cache Helpers ---
+
+// SetJSON marshals v to JSON and stores it in Redis with the given TTL.
+func (r *RedisClientWrapper) SetJSON(ctx context.Context, key string, v interface{}, ttl time.Duration) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("cache marshal error: %w", err)
+	}
+	return r.client.Set(ctx, key, data, ttl).Err()
+}
+
+// GetJSON retrieves JSON from Redis and unmarshals it into dest.
+// Returns redis.Nil if key does not exist.
+func (r *RedisClientWrapper) GetJSON(ctx context.Context, key string, dest interface{}) error {
+	data, err := r.client.Get(ctx, key).Bytes()
+	if err != nil {
+		return err // returns redis.Nil if not found
+	}
+	return json.Unmarshal(data, dest)
+}
+
+// DeleteByPattern uses SCAN to find keys matching the pattern and deletes them.
+// Used for cache invalidation (e.g., "idp:jobs:user:<id>:*").
+func (r *RedisClientWrapper) DeleteByPattern(ctx context.Context, pattern string) error {
+	log.Printf("[REDIS] Attempting to delete pattern: %s", pattern)
+	var cursor uint64
+	var totalDeleted int
+
+	for {
+		keys, nextCursor, err := r.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			log.Printf("[REDIS] ❌ SCAN error for pattern %s: %v", pattern, err)
+			return fmt.Errorf("cache scan error: %w", err)
+		}
+
+		if len(keys) > 0 {
+			log.Printf("[REDIS] Found %d keys matching pattern '%s'. Deleting...", len(keys), pattern)
+			if err := r.client.Del(ctx, keys...).Err(); err != nil {
+				log.Printf("[REDIS] ❌ DEL error for pattern %s: %v", pattern, err)
+				return fmt.Errorf("cache del error: %w", err)
+			}
+			totalDeleted += len(keys)
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	log.Printf("[REDIS] ✅ Successfully deleted %d total keys for pattern: %s", totalDeleted, pattern)
+	return nil
+}
+

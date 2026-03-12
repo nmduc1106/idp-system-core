@@ -1,22 +1,29 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
+	"idp-api-gateway/internal/core/domain"
 	"idp-api-gateway/internal/core/ports"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
-// allowedMimeTypes defines the set of acceptable file types for document upload.
-var allowedMimeTypes = map[string]bool{
+// allowedMagicMimeTypes defines the MIME types permitted after magic bytes detection.
+var allowedMagicMimeTypes = map[string]bool{
 	"image/jpeg":      true,
 	"image/png":       true,
-	"image/tiff":      true,
 	"application/pdf": true,
 }
+
+// fileCodeRegex: alphanumeric, dashes, underscores only, max 50 chars.
+var fileCodeRegex = regexp.MustCompile(`^[a-zA-Z0-9\-_]{1,50}$`)
 
 type HTTPHandler struct {
 	service ports.IDPService
@@ -28,15 +35,17 @@ func NewHTTPHandler(service ports.IDPService) *HTTPHandler {
 
 // Upload godoc
 // @Summary      Upload Document
-// @Description  Upload a PDF or Image file. Requires Bearer Token.
+// @Description  Upload a PDF or Image file with metadata. Requires Bearer Token. Validates file content via Magic Bytes.
 // @Tags         jobs
 // @Security     BearerAuth
 // @Accept       multipart/form-data
 // @Produce      json
-// @Param        file formData file true "Document file (PDF, PNG, JPG, TIFF)"
+// @Param        file formData file true "Document file (PDF, PNG, JPG)"
+// @Param        file_code formData string true "User-defined document code (alphanumeric, dashes, max 50 chars)"
+// @Param        notes formData string false "Optional notes about the document"
 // @Success      200 {object} map[string]string "Returns job_id and status"
 // @Failure      401 {object} map[string]string "Unauthorized"
-// @Failure      400 {object} map[string]string "No file uploaded or unsupported file type"
+// @Failure      400 {object} map[string]string "Validation error or unsupported file type"
 // @Router       /api/v1/upload [post]
 func (h *HTTPHandler) Upload(c *gin.Context) {
 	// 1. Extract UserID from Context (injected by Auth Middleware)
@@ -47,21 +56,28 @@ func (h *HTTPHandler) Upload(c *gin.Context) {
 	}
 	userID := userIDVal.(uuid.UUID)
 
-	// 2. Get file from request
+	// 2. Validate file_code (required, alphanumeric + dashes, max 50 chars)
+	fileCode := strings.TrimSpace(c.PostForm("file_code"))
+	if fileCode == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file_code is required"})
+		return
+	}
+	if !fileCodeRegex.MatchString(fileCode) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file_code must be alphanumeric with dashes/underscores only, max 50 characters"})
+		return
+	}
+
+	// 3. Sanitize optional notes
+	notes := strings.TrimSpace(c.PostForm("notes"))
+
+	// 4. Get file from request
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
 		return
 	}
 
-	// 3. Validate MIME type (allow images + PDF)
-	contentType := fileHeader.Header.Get("Content-Type")
-	if !allowedMimeTypes[contentType] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported file type. Allowed: JPEG, PNG, TIFF, PDF"})
-		return
-	}
-
-	// 4. Open file stream
+	// 5. Open file stream
 	file, err := fileHeader.Open()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to open file"})
@@ -69,20 +85,88 @@ func (h *HTTPHandler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// 5. Call Service (pass userID for ownership)
-	job, err := h.service.UploadDocument(c.Request.Context(), userID, fileHeader.Filename, fileHeader.Size, file, contentType)
+	// 6. Magic Bytes Validation: Read first 512 bytes to detect actual MIME type
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to read file for validation"})
+		return
+	}
+	detectedType := http.DetectContentType(buf[:n])
+
+	if !allowedMagicMimeTypes[detectedType] {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":         "Unsupported file type detected. Allowed: JPEG, PNG, PDF",
+			"detected_type": detectedType,
+		})
+		return
+	}
+
+	// 7. Reconstruct the full reader: prepend the already-read bytes back
+	fullReader := io.MultiReader(bytes.NewReader(buf[:n]), file)
+
+	// 8. Call Service (pass userID + metadata)
+	job, err := h.service.UploadDocument(
+		c.Request.Context(),
+		userID,
+		fileHeader.Filename,
+		fileHeader.Size,
+		fullReader,
+		detectedType, // Use magic-bytes detected type, NOT client header
+		fileCode,
+		notes,
+	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 6. Return result
+	// 9. Return result
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Upload successful",
 		"job_id":  job.ID,
 		"doc_id":  job.DocumentID,
 		"status":  job.State,
 	})
+}
+
+// GetUserJobs godoc
+// @Summary      Get User's Jobs (Paginated)
+// @Description  Returns the authenticated user's jobs with pagination and optional filters.
+// @Tags         jobs
+// @Security     BearerAuth
+// @Produce      json
+// @Param        page query int false "Page number (default: 1)"
+// @Param        limit query int false "Items per page (default: 10, max: 100)"
+// @Param        status query string false "Filter by status (PENDING, EXTRACTING, COMPLETED, FAILED)"
+// @Param        file_code query string false "Filter by file code (substring match)"
+// @Success      200 {object} domain.PaginatedResponse
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Router       /api/v1/jobs [get]
+func (h *HTTPHandler) GetUserJobs(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: Missing User Context"})
+		return
+	}
+	userID := userIDVal.(uuid.UUID)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	q := domain.PaginationQuery{
+		Page:     page,
+		Limit:    limit,
+		Status:   strings.TrimSpace(c.Query("status")),
+		FileCode: strings.TrimSpace(c.Query("file_code")),
+	}
+	q.Normalize()
+
+	result, err := h.service.GetUserJobs(c.Request.Context(), userID, q)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 // GetJob godoc

@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"idp-api-gateway/internal/core/domain"
 	"idp-api-gateway/internal/core/ports"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -34,21 +37,35 @@ func (h *AdminHandler) GetStats(c *gin.Context) {
 }
 
 // GetJobs godoc
-// @Summary      Get All Jobs
-// @Description  Returns all jobs with associated user info ordered by created_at DESC. ADMIN only.
+// @Summary      Get All Jobs (Paginated)
+// @Description  Returns all jobs with pagination, optional status/file_code filters, and associated user/document info. ADMIN only.
 // @Tags         admin
 // @Security     BearerAuth
 // @Produce      json
-// @Success      200 {array} map[string]interface{} "List of all jobs"
+// @Param        page query int false "Page number (default: 1)"
+// @Param        limit query int false "Items per page (default: 10, max: 100)"
+// @Param        status query string false "Filter by status"
+// @Param        file_code query string false "Filter by file code"
+// @Success      200 {object} domain.PaginatedResponse
 // @Failure      403 {object} map[string]string "Forbidden"
 // @Router       /api/v1/admin/jobs [get]
 func (h *AdminHandler) GetJobs(c *gin.Context) {
-	jobs, err := h.service.GetAllJobs(c.Request.Context())
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	q := domain.PaginationQuery{
+		Page:     page,
+		Limit:    limit,
+		Status:   strings.TrimSpace(c.Query("status")),
+		FileCode: strings.TrimSpace(c.Query("file_code")),
+	}
+	q.Normalize()
+
+	result, err := h.service.GetAllJobs(c.Request.Context(), q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, jobs)
+	c.JSON(http.StatusOK, result)
 }
 
 // GetUsers godoc

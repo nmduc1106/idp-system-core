@@ -22,23 +22,45 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns all jobs with associated user info ordered by created_at DESC. ADMIN only.",
+                "description": "Returns all jobs with pagination, optional status/file_code filters, and associated user/document info. ADMIN only.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "Get All Jobs",
+                "summary": "Get All Jobs (Paginated)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (default: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default: 10, max: 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by file code",
+                        "name": "file_code",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "List of all jobs",
+                        "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": true
-                            }
+                            "$ref": "#/definitions/domain.PaginatedResponse"
                         }
                     },
                     "403": {
@@ -290,6 +312,66 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/jobs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the authenticated user's jobs with pagination and optional filters.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "jobs"
+                ],
+                "summary": "Get User's Jobs (Paginated)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (default: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default: 10, max: 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status (PENDING, EXTRACTING, COMPLETED, FAILED)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by file code (substring match)",
+                        "name": "file_code",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/domain.PaginatedResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/jobs/{id}": {
             "get": {
                 "security": [
@@ -401,7 +483,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Upload a PDF or Image file. Requires Bearer Token.",
+                "description": "Upload a PDF or Image file with metadata. Requires Bearer Token. Validates file content via Magic Bytes.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -415,10 +497,23 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "file",
-                        "description": "Document file (PDF, PNG, JPG, TIFF)",
+                        "description": "Document file (PDF, PNG, JPG)",
                         "name": "file",
                         "in": "formData",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User-defined document code (alphanumeric, dashes, max 50 chars)",
+                        "name": "file_code",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional notes about the document",
+                        "name": "notes",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -432,7 +527,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "No file uploaded or unsupported file type",
+                        "description": "Validation error or unsupported file type",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -497,9 +592,101 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/internal/webhook/job-completed": {
+            "post": {
+                "description": "Called by the Python worker after updating a job to COMPLETED/FAILED. Triggers cache invalidation. Requires X-Webhook-Secret header.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "internal"
+                ],
+                "summary": "Internal Webhook: Notify Job Completion",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Shared webhook secret",
+                        "name": "X-Webhook-Secret",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Payload: {\\",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Cache invalidated",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Missing job_id",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Invalidation failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
+        "domain.PaginatedResponse": {
+            "type": "object",
+            "properties": {
+                "data": {},
+                "limit": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
         "domain.User": {
             "type": "object",
             "properties": {

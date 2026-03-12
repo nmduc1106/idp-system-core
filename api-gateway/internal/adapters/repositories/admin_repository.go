@@ -53,16 +53,39 @@ func (r *AdminRepositoryImpl) GetStats(ctx context.Context) (map[string]interfac
 	}, nil
 }
 
-// GetAllJobsWithUsers fetches all jobs ordered by created_at DESC with associated User info.
-func (r *AdminRepositoryImpl) GetAllJobsWithUsers(ctx context.Context) ([]domain.Job, error) {
+// GetAllJobsWithUsers fetches paginated, filtered jobs with User and Document associations.
+func (r *AdminRepositoryImpl) GetAllJobsWithUsers(ctx context.Context, q domain.PaginationQuery) ([]domain.Job, int64, error) {
 	var jobs []domain.Job
-	if err := r.db.WithContext(ctx).
-		Preload("User").
-		Order("created_at DESC").
-		Find(&jobs).Error; err != nil {
-		return nil, err
+	var total int64
+
+	query := r.db.WithContext(ctx).Model(&domain.Job{})
+
+	// Apply optional filters
+	if q.Status != "" {
+		query = query.Where("state = ?", q.Status)
 	}
-	return jobs, nil
+	if q.FileCode != "" {
+		query = query.Joins("JOIN documents ON documents.id = jobs.document_id").
+			Where("documents.file_code ILIKE ?", "%"+q.FileCode+"%")
+	}
+
+	// Count total matching records
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// Fetch paginated results with associations
+	if err := query.
+		Preload("User").
+		Preload("Document").
+		Order("created_at DESC").
+		Offset(q.Offset()).
+		Limit(q.Limit).
+		Find(&jobs).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return jobs, total, nil
 }
 
 // GetAllUsers fetches all users ordered by created_at DESC. PasswordHash is hidden by json:"-" tag.

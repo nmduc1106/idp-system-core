@@ -123,15 +123,18 @@ func main() {
 	// --- 5. KHỞI TẠO MODULE DOCUMENT ---
 	docRepo := repositories.NewPostgresRepository(db)
 	fileStorage := storage.NewMinIOStorage(minioClient)
-	idpService := services.NewIDPService(docRepo, fileStorage, queueProducer, redisClient)
+	idpService := services.NewIDPService(docRepo, fileStorage, queueProducer, redisClient, redisClient)
 	httpHandler := handlers.NewHTTPHandler(idpService)
 
 	// --- 6. KHỞI TẠO MODULE ADMIN ---
 	adminRepo := repositories.NewAdminRepository(db)
-	adminService := services.NewAdminService(adminRepo)
+	adminService := services.NewAdminService(adminRepo, redisClient)
 	adminHandler := handlers.NewAdminHandler(adminService)
 
-	// --- 6. SETUP ROUTER ---
+	// --- 7. KHỞI TẠO WEBHOOK HANDLER ---
+	webhookHandler := handlers.NewWebhookHandler(idpService)
+
+	// --- 8. SETUP ROUTER ---
 	r := gin.Default()
 
 	// CORS Middleware - must be before any route definitions
@@ -149,6 +152,12 @@ func main() {
 	// Swagger
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
+	// Internal routes (no auth - called by Python worker within Docker network)
+	internal := r.Group("/internal")
+	{
+		internal.POST("/webhook/job-completed", webhookHandler.JobCompleted)
+	}
+
 	// API Routes
 	v1 := r.Group("/api/v1")
 	{
@@ -164,6 +173,7 @@ func main() {
 		protected := v1.Group("/", middlewares.JWTMiddleware(jwtSecret))
 		{
 			protected.POST("/upload", middlewares.RateLimitMiddleware(redisClient, 10, time.Minute), httpHandler.Upload)
+			protected.GET("/jobs", httpHandler.GetUserJobs)
 			protected.GET("/jobs/:id", httpHandler.GetJob)
 			protected.GET("/jobs/:id/stream", httpHandler.StreamJob)
 			protected.POST("/auth/logout", authHandler.Logout)

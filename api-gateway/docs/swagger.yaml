@@ -1,4 +1,16 @@
 definitions:
+  domain.PaginatedResponse:
+    properties:
+      data: {}
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
   domain.User:
     properties:
       created_at:
@@ -61,18 +73,32 @@ info:
 paths:
   /api/v1/admin/jobs:
     get:
-      description: Returns all jobs with associated user info ordered by created_at
-        DESC. ADMIN only.
+      description: Returns all jobs with pagination, optional status/file_code filters,
+        and associated user/document info. ADMIN only.
+      parameters:
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Items per page (default: 10, max: 100)'
+        in: query
+        name: limit
+        type: integer
+      - description: Filter by status
+        in: query
+        name: status
+        type: string
+      - description: Filter by file code
+        in: query
+        name: file_code
+        type: string
       produces:
       - application/json
       responses:
         "200":
-          description: List of all jobs
+          description: OK
           schema:
-            items:
-              additionalProperties: true
-              type: object
-            type: array
+            $ref: '#/definitions/domain.PaginatedResponse'
         "403":
           description: Forbidden
           schema:
@@ -81,7 +107,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: Get All Jobs
+      summary: Get All Jobs (Paginated)
       tags:
       - admin
   /api/v1/admin/stats:
@@ -240,6 +266,45 @@ paths:
       summary: Register new user
       tags:
       - auth
+  /api/v1/jobs:
+    get:
+      description: Returns the authenticated user's jobs with pagination and optional
+        filters.
+      parameters:
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Items per page (default: 10, max: 100)'
+        in: query
+        name: limit
+        type: integer
+      - description: Filter by status (PENDING, EXTRACTING, COMPLETED, FAILED)
+        in: query
+        name: status
+        type: string
+      - description: Filter by file code (substring match)
+        in: query
+        name: file_code
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/domain.PaginatedResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get User's Jobs (Paginated)
+      tags:
+      - jobs
   /api/v1/jobs/{id}:
     get:
       parameters:
@@ -310,13 +375,23 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: Upload a PDF or Image file. Requires Bearer Token.
+      description: Upload a PDF or Image file with metadata. Requires Bearer Token.
+        Validates file content via Magic Bytes.
       parameters:
-      - description: Document file (PDF, PNG, JPG, TIFF)
+      - description: Document file (PDF, PNG, JPG)
         in: formData
         name: file
         required: true
         type: file
+      - description: User-defined document code (alphanumeric, dashes, max 50 chars)
+        in: formData
+        name: file_code
+        required: true
+        type: string
+      - description: Optional notes about the document
+        in: formData
+        name: notes
+        type: string
       produces:
       - application/json
       responses:
@@ -327,7 +402,7 @@ paths:
               type: string
             type: object
         "400":
-          description: No file uploaded or unsupported file type
+          description: Validation error or unsupported file type
           schema:
             additionalProperties:
               type: string
@@ -373,6 +448,56 @@ paths:
       summary: Get current user profile
       tags:
       - users
+  /internal/webhook/job-completed:
+    post:
+      consumes:
+      - application/json
+      description: Called by the Python worker after updating a job to COMPLETED/FAILED.
+        Triggers cache invalidation. Requires X-Webhook-Secret header.
+      parameters:
+      - description: Shared webhook secret
+        in: header
+        name: X-Webhook-Secret
+        required: true
+        type: string
+      - description: 'Payload: {\'
+        in: body
+        name: body
+        required: true
+        schema:
+          additionalProperties:
+            type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Cache invalidated
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Missing job_id
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Invalidation failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 'Internal Webhook: Notify Job Completion'
+      tags:
+      - internal
 securityDefinitions:
   BearerAuth:
     in: header

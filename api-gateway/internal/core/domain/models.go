@@ -13,6 +13,9 @@ type Document struct {
 	ID               uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
 	UserID           uuid.UUID `gorm:"type:uuid;not null" json:"user_id"`
 	OriginalFilename string    `json:"original_filename"`
+	FileName         string    `gorm:"type:varchar(255)" json:"file_name"`
+	FileCode         string    `gorm:"type:varchar(50);index" json:"file_code"`
+	Notes            string    `gorm:"type:text" json:"notes,omitempty"`
 	StorageBucket    string    `json:"-"`
 	StoragePath      string    `json:"-"`
 	MimeType         string    `json:"mime_type"`
@@ -37,6 +40,7 @@ type Job struct {
 	FinishedAt   *time.Time      `json:"finished_at,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
 
-	// Association: GORM Preload for Admin queries (constraint:false to skip FK migration)
+	// Associations: GORM Preload for enriched responses (constraint:false to skip FK migration)
 	User         *User           `gorm:"foreignKey:UserID;references:ID;constraint:false" json:"user,omitempty"`
+	Document     *Document       `gorm:"foreignKey:DocumentID;constraint:false" json:"document,omitempty"`
 }
