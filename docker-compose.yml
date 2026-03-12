@@ -65,6 +65,8 @@ services:
       - redis_data:/data
     networks:
       - idp_network
+    ports:
+      - "6379:6379"
 
 # =========================================================
 # 3 RABBITMQ

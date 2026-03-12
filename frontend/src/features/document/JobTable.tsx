@@ -98,16 +98,16 @@ const JobTable: React.FC<JobTableProps> = ({ jobs, onJobUpdate }) => {
                                             </div>
                                             <div className="ml-4">
                                                 <div className="text-sm font-medium text-slate-900 dark:text-white">
-                                                    Doc: {job.document_id.substring(0, 8)}...
+                                                    Doc: {job.document_id?.substring(0, 8) || '—'}...
                                                 </div>
                                                 <div className="text-xs text-slate-500 dark:text-slate-400">
-                                                    ID: {job.id.substring(0, 8)}...
+                                                    ID: {job.id?.substring(0, 8) || '—'}...
                                                 </div>
                                             </div>
                                         </div>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400">
-                                        {new Date(job.created_at).toLocaleString()}
+                                        {job.created_at ? new Date(job.created_at).toLocaleString() : '—'}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         {getStateBadge(job.state)}

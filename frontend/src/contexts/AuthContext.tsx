@@ -1,4 +1,5 @@
 import React, { createContext, useState, useEffect } from 'react';
+import apiClient from '../utils/apiClient';
 
 export interface User {
     id?: string;
@@ -39,10 +40,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         localStorage.setItem('user', JSON.stringify(userData));
     };
 
-    const logout = () => {
-        setUser(null);
-        localStorage.removeItem('user');
-        // Backend should invalidate the HttpOnly cookie upon logout API call
+    const logout = async () => {
+        try {
+            // Call backend to invalidate refresh token in Redis & clear HttpOnly cookies
+            await apiClient.post('/auth/logout');
+        } catch (err) {
+            // Even if the API call fails (e.g. token expired), we must still clear local state
+            console.error('Logout API call failed:', err);
+        } finally {
+            setUser(null);
+            localStorage.removeItem('user');
+        }
     };
 
     if (isLoading) {

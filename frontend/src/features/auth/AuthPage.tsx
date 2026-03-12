@@ -36,9 +36,11 @@ const AuthPage: React.FC = () => {
 
         try {
             if (isLogin) {
-                const data = await authService.login(cleanEmail, cleanPassword);
+                await authService.login(cleanEmail, cleanPassword);
+                // Cookies are now set by backend — fetch full profile (including role) for AuthContext
+                const profile = await authService.fetchProfile();
                 if (authContext) {
-                    authContext.login(data.user || { email: cleanEmail });
+                    authContext.login(profile);
                 }
                 navigate('/');
             } else {
@@ -47,7 +49,7 @@ const AuthPage: React.FC = () => {
                 setIsLogin(true);
             }
         } catch (err: any) {
-            setError(err.response?.data?.message || err.message || 'Xác thực thất bại');
+            setError(err.response?.data?.message || err.response?.data?.error || err.message || 'Xác thực thất bại');
         } finally {
             setIsSubmitting(false);
         }

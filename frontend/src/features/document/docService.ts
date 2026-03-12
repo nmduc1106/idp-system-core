@@ -40,7 +40,16 @@ export const streamJobStatus = (
 
     source.onmessage = (e: MessageEvent) => {
         try {
-            const data: Job = JSON.parse(e.data);
+            const raw = JSON.parse(e.data);
+
+            // Map Python worker field names to frontend Job interface
+            // Python sends: { job_id, status, result } 
+            // Frontend expects: { id, state, result }
+            const data: Job = {
+                ...raw,
+                id: raw.id || raw.job_id,
+                state: raw.state || raw.status,
+            };
             onMessage(data);
 
             if (data.state === 'COMPLETED' || data.state === 'FAILED') {
