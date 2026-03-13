@@ -45,10 +45,10 @@ These components handle user interactions, state representation, and beautiful T
 
 | Feature | Description | Primary Files |
 | :--- | :--- | :--- |
-| **Authentication** | Secure JWT-based login and registration with automatic token injection. | `AuthContext.tsx`, `AuthPage.tsx`, `authService.ts` |
-| **Protected Routing** | Restricts unauthenticated users from accessing the private dashboard. | `ProtectedRoute.tsx`, `App.tsx` |
-| **Document Management** | Seamless drag-and-drop upload for PDF, PNG, and JPEG files. | `UploadZone.tsx`, `docService.ts` |
-| **Real-time Monitoring** | Zero-refresh Server-Sent Events (SSE) tracking of extraction jobs (PENDING to COMPLETED). | `JobTable.tsx`, `docService.ts` |
+| **Authentication** | Secure JWT-based login with automatic token injection. | `AuthContext.tsx`, `authService.ts` |
+| **2-Phase Upload** | Secure drag-and-drop upload requiring a Regex-validated `File Code` and sanitized `Notes` before API submission. | `UploadZone.tsx`, `docService.ts` |
+| **Paginated Tables** | Data tables featuring server-side pagination, search by File Code, and optimized re-renders. | `JobTable.tsx`, `AdminJobs.tsx` |
+| **Robust Real-time SSE** | Zero-refresh SSE tracking. Smart payload merging ensures nested metadata (`file_name`, `file_code`) is preserved when transitioning from PENDING to COMPLETED. | `JobTable.tsx`, `docService.ts`, `Dashboard.tsx` |
 
 ## 4. Technical Stack
 

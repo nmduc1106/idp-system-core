@@ -14,6 +14,8 @@ secrets/
 !.env.example
 ocr-worker/.env
 api-gateway/.env
+frontend/.env
+question.docx
 
 # --- Python ---
 __pycache__/
