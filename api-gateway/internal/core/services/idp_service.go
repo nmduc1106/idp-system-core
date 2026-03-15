@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"github.com/xuri/excelize/v2"
 )
 
 const jobCacheTTL = 5 * time.Minute
@@ -192,4 +194,105 @@ func (s *IDPServiceImpl) invalidateJobCachesInternal(ctx context.Context, userID
 			log.Printf("⚠️ Cache invalidation warning for pattern %s: %v", p, err)
 		}
 	}
+}
+
+// ExportJobsToExcel generates an Excel file from completed jobs without leaking DB IDs.
+func (s *IDPServiceImpl) ExportJobsToExcel(ctx context.Context, userID string, searchCode string) (*bytes.Buffer, error) {
+	jobs, err := s.repo.GetCompletedJobsForExport(ctx, userID, searchCode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch jobs for export: %w", err)
+	}
+
+	f := excelize.NewFile()
+	sheet := "Sheet1"
+
+	// Create a Header Row
+	headers := []string{"STT", "Mã Hồ Sơ", "Tên File Gốc", "Ngày Tải Lên", "Tên Nhà Cung Cấp", "Mã Số Thuế", "Số Hóa Đơn", "Ngày Hóa Đơn", "Tổng Tiền"}
+	for i, header := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellValue(sheet, cell, header)
+	}
+
+	// Set Column Widths for readability
+	f.SetColWidth(sheet, "A", "A", 5)
+	f.SetColWidth(sheet, "B", "B", 15)
+	f.SetColWidth(sheet, "C", "C", 25)
+	f.SetColWidth(sheet, "D", "D", 22)
+	f.SetColWidth(sheet, "E", "E", 35)
+	f.SetColWidth(sheet, "F", "F", 20)
+	f.SetColWidth(sheet, "G", "G", 20)
+	f.SetColWidth(sheet, "H", "H", 15)
+	f.SetColWidth(sheet, "I", "I", 15)
+
+	// Bold style and Center alignment for header
+	style, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+		Alignment: &excelize.Alignment{
+			Horizontal: "center",
+			Vertical:   "center",
+		},
+	})
+	f.SetRowStyle(sheet, 1, 1, style)
+
+	for i, job := range jobs {
+		row := i + 2
+		stt := i + 1
+
+		fileCode := ""
+		fileName := ""
+		if job.Document != nil {
+			fileCode = job.Document.FileCode
+			fileName = job.Document.OriginalFilename
+			if fileName == "" {
+				fileName = job.Document.FileName
+			}
+		}
+		
+		uploadDate := ""
+		if !job.CreatedAt.IsZero() {
+			uploadDate = job.CreatedAt.Format("2006-01-02 15:04:05")
+		}
+
+		// Parse the JSON Result
+		var extractedData map[string]interface{}
+		if len(job.Result) > 0 {
+			var resultPayload map[string]interface{}
+			if err := json.Unmarshal(job.Result, &resultPayload); err == nil {
+				// The Python worker wraps it in "extracted_data", gracefully handle both structures
+				if data, ok := resultPayload["extracted_data"].(map[string]interface{}); ok {
+					extractedData = data
+				} else {
+					extractedData = resultPayload
+				}
+			}
+		}
+
+		// Safe JSON nested field extractor
+		getStr := func(key string) string {
+			if extractedData == nil {
+				return ""
+			}
+			if val, ok := extractedData[key]; ok && val != nil {
+				return fmt.Sprintf("%v", val)
+			}
+			return ""
+		}
+
+		f.SetCellValue(sheet, fmt.Sprintf("A%d", row), stt)
+		f.SetCellValue(sheet, fmt.Sprintf("B%d", row), fileCode)
+		f.SetCellValue(sheet, fmt.Sprintf("C%d", row), fileName)
+		f.SetCellValue(sheet, fmt.Sprintf("D%d", row), uploadDate)
+		f.SetCellValue(sheet, fmt.Sprintf("E%d", row), getStr("vendor_name"))
+		f.SetCellValue(sheet, fmt.Sprintf("F%d", row), getStr("tax_id"))
+		f.SetCellValue(sheet, fmt.Sprintf("G%d", row), getStr("invoice_number"))
+		f.SetCellValue(sheet, fmt.Sprintf("H%d", row), getStr("date"))
+		f.SetCellValue(sheet, fmt.Sprintf("I%d", row), getStr("total_amount"))
+	}
+
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		return nil, fmt.Errorf("failed to write excel to buffer: %w", err)
+	}
+
+	return &buf, nil
 }

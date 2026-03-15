@@ -70,6 +70,31 @@ export const getUserJobs = async (q: JobQuery = {}): Promise<PaginatedResponse<J
     return response.data;
 };
 
+// --- Export to Excel ---
+export const exportJobsExcel = async (fileCode?: string): Promise<void> => {
+    const params = new URLSearchParams();
+    if (fileCode) params.append('file_code', fileCode);
+
+    const response = await apiClient.get(`/jobs/export?${params.toString()}`, {
+        responseType: 'blob',
+    });
+
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    
+    // Format: IDP_Report_2026-03-15.xlsx
+    const dateStr = new Date().toISOString().split('T')[0];
+    link.setAttribute('download', `IDP_Report_${dateStr}.xlsx`);
+    
+    document.body.appendChild(link);
+    link.click();
+    
+    // Cleanup
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+};
+
 // --- SSE Stream ---
 export const streamJobStatus = (
     jobId: string,

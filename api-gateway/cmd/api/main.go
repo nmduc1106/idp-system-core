@@ -174,6 +174,7 @@ func main() {
 		{
 			protected.POST("/upload", middlewares.RateLimitMiddleware(redisClient, 10, time.Minute), httpHandler.Upload)
 			protected.GET("/jobs", httpHandler.GetUserJobs)
+			protected.GET("/jobs/export", httpHandler.ExportJobsExcel)
 			protected.GET("/jobs/:id", httpHandler.GetJob)
 			protected.GET("/jobs/:id/stream", httpHandler.StreamJob)
 			protected.POST("/auth/logout", authHandler.Logout)

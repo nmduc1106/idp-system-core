@@ -263,3 +263,41 @@ func (h *HTTPHandler) StreamJob(c *gin.Context) {
 		}
 	})
 }
+
+// ExportJobsExcel godoc
+// @Summary      Export Completed Jobs to Excel
+// @Description  Downloads an Excel file containing extracted OCR data for completed jobs.
+// @Tags         jobs
+// @Security     BearerAuth
+// @Produce      application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+// @Param        file_code query string false "Filter by File Code"
+// @Success      200 {file} file "IDP_Report.xlsx"
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      500 {object} map[string]string "Failed to generate report"
+// @Router       /api/v1/jobs/export [get]
+func (h *HTTPHandler) ExportJobsExcel(c *gin.Context) {
+	// 1. Extract UserID from Context
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: Missing User Context"})
+		return
+	}
+	userID := userIDVal.(uuid.UUID).String()
+
+	// 2. Extract query params
+	fileCode := c.Query("file_code")
+
+	// 3. Generate Excel
+	buf, err := h.service.ExportJobsToExcel(c.Request.Context(), userID, fileCode)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 4. Stream response
+	c.Header("Content-Disposition", "attachment; filename=IDP_Report.xlsx")
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Transfer-Encoding", "binary")
+	
+	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
+}

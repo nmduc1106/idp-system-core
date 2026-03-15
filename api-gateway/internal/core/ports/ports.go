@@ -1,6 +1,7 @@
 package ports
 
 import (
+	"bytes"
 	"context"
 	"idp-api-gateway/internal/core/domain"
 	"io"
@@ -16,6 +17,7 @@ type DocumentRepository interface {
 	GetJobByID(ctx context.Context, id string, userID string) (*domain.Job, error)
 	GetJobByIDInternal(ctx context.Context, id string) (*domain.Job, error) // No user filter (for internal webhook)
 	GetJobsByUserID(ctx context.Context, userID string, q domain.PaginationQuery) ([]domain.Job, int64, error)
+	GetCompletedJobsForExport(ctx context.Context, userID string, searchCode string) ([]domain.Job, error)
 }
 
 // FileStorage: Giao tiếp với MinIO/S3
@@ -47,6 +49,7 @@ type IDPService interface {
 	GetUserJobs(ctx context.Context, userID uuid.UUID, q domain.PaginationQuery) (*domain.PaginatedResponse, error)
 	StreamJobStatus(ctx context.Context, userID uuid.UUID, jobID string) (<-chan string, error)
 	InvalidateJobCaches(ctx context.Context, jobID string) error // Called by internal webhook
+	ExportJobsToExcel(ctx context.Context, userID string, searchCode string) (*bytes.Buffer, error)
 }
 
 // AdminRepository: Giao tiếp với Database cho Admin queries

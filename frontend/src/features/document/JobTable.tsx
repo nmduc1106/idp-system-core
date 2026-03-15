@@ -12,12 +12,15 @@ interface JobTableProps {
     searchCode: string;
     onSearch: (code: string) => void;
     onPageChange: (page: number) => void;
+    isExporting: boolean;
+    onExport: (code: string) => void;
 }
 
 const JobTable: React.FC<JobTableProps> = ({
     jobs, onJobUpdate, loading,
     page, totalPages, total,
     searchCode, onSearch, onPageChange,
+    isExporting, onExport,
 }) => {
     const [selectedResult, setSelectedResult] = useState<any | null>(null);
     const [searchInput, setSearchInput] = useState(searchCode);
@@ -118,15 +121,26 @@ const JobTable: React.FC<JobTableProps> = ({
                     <h2 className="text-lg font-semibold text-slate-900">Processing History</h2>
                     <p className="text-sm text-slate-500">{total} document{total !== 1 ? 's' : ''} total</p>
                 </div>
-                <form onSubmit={handleSearchSubmit} className="relative w-full sm:w-64">
-                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                    <input
-                        type="text"
-                        value={searchInput}
-                        onChange={(e) => setSearchInput(e.target.value)}
-                        placeholder="Search by File Code..."
-                        className="w-full pl-10 pr-4 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-primary focus:border-primary outline-none"
-                    />
+                <form onSubmit={handleSearchSubmit} className="relative w-full sm:w-auto flex gap-2">
+                    <div className="relative flex-1 sm:w-64">
+                        <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                        <input
+                            type="text"
+                            value={searchInput}
+                            onChange={(e) => setSearchInput(e.target.value)}
+                            placeholder="Search by File Code..."
+                            className="w-full pl-10 pr-4 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-primary focus:border-primary outline-none"
+                        />
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => onExport(searchInput.trim())}
+                        disabled={isExporting}
+                        className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-emerald-600 border border-transparent rounded-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap shadow-sm transition-colors"
+                    >
+                        {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <span className="mr-2 tracking-tighter">📥</span>}
+                        Xuất Excel
+                    </button>
                 </form>
             </div>
 

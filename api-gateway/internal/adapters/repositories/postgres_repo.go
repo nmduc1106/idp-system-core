@@ -77,3 +77,20 @@ func (r *PostgresRepository) GetJobsByUserID(ctx context.Context, userID string,
 
 	return jobs, total, nil
 }
+
+// GetCompletedJobsForExport returns all completed jobs without pagination for a specific user to be exported.
+func (r *PostgresRepository) GetCompletedJobsForExport(ctx context.Context, userID string, searchCode string) ([]domain.Job, error) {
+	var jobs []domain.Job
+	query := r.db.WithContext(ctx).Model(&domain.Job{}).
+		Where("user_id = ? AND state = ?", userID, "COMPLETED")
+
+	if searchCode != "" {
+		query = query.Joins("JOIN documents ON documents.id = jobs.document_id").
+			Where("documents.file_code ILIKE ?", "%"+searchCode+"%")
+	}
+
+	if err := query.Preload("Document").Order("created_at DESC").Find(&jobs).Error; err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}

@@ -2,13 +2,14 @@ import React, { useState, useCallback, useEffect } from 'react';
 import MainLayout from '../../components/layout/MainLayout';
 import UploadZone from './UploadZone';
 import JobTable from './JobTable';
-import { Job, getUserJobs, PaginatedResponse } from './docService';
+import { Job, getUserJobs, PaginatedResponse, exportJobsExcel } from './docService';
 
 const Dashboard: React.FC = () => {
     const [pageData, setPageData] = useState<PaginatedResponse<Job> | null>(null);
     const [page, setPage] = useState(1);
     const [searchCode, setSearchCode] = useState('');
     const [loading, setLoading] = useState(true);
+    const [isExporting, setIsExporting] = useState(false);
 
     const fetchJobs = useCallback(async () => {
         console.log(`[REFETCH] 🔄 Fetching jobs... Page: ${page} | SearchCode: ${searchCode}`);
@@ -59,6 +60,18 @@ const Dashboard: React.FC = () => {
         setPage(1);
     };
 
+    const handleExport = async (codeToExport: string) => {
+        setIsExporting(true);
+        try {
+            await exportJobsExcel(codeToExport);
+        } catch (err: any) {
+            console.error('[EXPORT] ❌ Failed to export jobs:', err);
+            alert('Failed to export Excel file. Please try again.');
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
     const jobs = pageData?.data || [];
 
     return (
@@ -86,6 +99,8 @@ const Dashboard: React.FC = () => {
                         searchCode={searchCode}
                         onSearch={handleSearch}
                         onPageChange={setPage}
+                        isExporting={isExporting}
+                        onExport={handleExport}
                     />
                 </section>
             </div>
