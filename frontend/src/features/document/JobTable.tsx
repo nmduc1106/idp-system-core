@@ -101,12 +101,23 @@ const JobTable: React.FC<JobTableProps> = ({
                         <XCircle className="w-3 h-3 mr-1" /> Failed
                     </span>
                 );
-            case 'EXTRACTING':
+            case 'PROCESSING':
             case 'PENDING':
+                const isPending = state === 'PENDING';
                 return (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
-                        <Loader2 className="w-3 h-3 mr-1 animate-spin" /> {state === 'PENDING' ? 'Pending' : 'Extracting...'}
-                    </span>
+                    <div className="flex flex-col gap-1.5 w-[110px]">
+                        <span className={`inline-flex items-center text-[10px] font-bold uppercase tracking-widest ${isPending ? 'text-slate-400' : 'text-primary'}`}>
+                            <Loader2 className={`w-3 h-3 mr-1 animate-spin ${isPending ? 'opacity-50' : ''}`} />
+                            {isPending ? 'Queued' : 'Processing...'}
+                        </span>
+                        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden relative border border-slate-200/50">
+                            {isPending ? (
+                                <div className="absolute top-0 bottom-0 left-0 w-1/4 bg-slate-200 rounded-full"></div>
+                            ) : (
+                                <div className="absolute top-0 bottom-0 left-0 w-1/2 bg-primary rounded-full animate-indeterminate"></div>
+                            )}
+                        </div>
+                    </div>
                 );
             default:
                 return <span className="text-xs text-slate-500">{state}</span>;
@@ -244,23 +255,81 @@ const JobTable: React.FC<JobTableProps> = ({
             </div>
 
             {/* Result Modal */}
-            {selectedResult && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-                    <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col border border-slate-200">
-                        <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-xl">
-                            <h3 className="text-lg font-bold text-slate-900">Extraction Result</h3>
-                            <button onClick={() => setSelectedResult(null)} className="text-slate-400 hover:text-slate-500">
-                                <XCircle className="w-6 h-6" />
-                            </button>
-                        </div>
-                        <div className="p-6 overflow-y-auto w-full">
-                            <pre className="bg-slate-900 text-slate-300 p-4 rounded-lg overflow-x-auto text-sm">
-                                {JSON.stringify(selectedResult, null, 2)}
-                            </pre>
+            {selectedResult && (() => {
+                let data: any = {};
+                try {
+                    const resultObj = typeof selectedResult === 'string' ? JSON.parse(selectedResult) : selectedResult;
+                    data = resultObj.extracted_data || resultObj;
+                } catch (e) {
+                    data = selectedResult;
+                }
+
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                        <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col border border-slate-200 relative overflow-hidden">
+
+                            {/* Jagged Receipt Top Edge */}
+                            <div className="absolute top-0 left-0 w-full h-3 flex text-white fill-current">
+                                {[...Array(24)].map((_, i) => (
+                                    <svg key={i} className="h-3 w-auto flex-1" viewBox="0 0 10 10" preserveAspectRatio="none">
+                                        <polygon points="0,0 10,0 5,10" />
+                                    </svg>
+                                ))}
+                            </div>
+
+                            <div className="px-6 pt-8 pb-4 border-b border-dashed border-slate-300 flex justify-between items-start bg-slate-50">
+                                <div>
+                                    <h3 className="text-xl font-bold text-slate-900 uppercase tracking-wider">{data.vendor_name || 'UNKNOWN VENDOR'}</h3>
+                                    {data.vendor_address && <p className="text-xs text-slate-500 mt-1 max-w-[250px]">{data.vendor_address}</p>}
+                                </div>
+                                <button onClick={() => setSelectedResult(null)} className="text-slate-400 hover:text-slate-600 transition-colors p-1 bg-white rounded-full shadow-sm border border-slate-200">
+                                    <XCircle className="w-5 h-5" />
+                                </button>
+                            </div>
+
+                            <div className="p-8 overflow-y-auto w-full bg-slate-50 font-mono text-sm custom-scrollbar">
+                                <div className="flex justify-between border-b border-dashed border-slate-300 pb-4 mb-5 text-slate-600">
+                                    <div className="space-y-1">
+                                        <p><span className="text-slate-400">TAX ID:</span> <span className="text-slate-800 font-medium">{data.tax_id || 'N/A'}</span></p>
+                                        <p><span className="text-slate-400">DATE:</span> <span className="text-slate-800 font-medium">{data.date || 'N/A'}</span></p>
+                                    </div>
+                                    <div className="text-right space-y-1">
+                                        <p><span className="text-slate-400">INV #:</span> <span className="text-slate-800 font-medium">{data.invoice_number || 'N/A'}</span></p>
+                                    </div>
+                                </div>
+
+                                <div className="border-y-2 border-solid border-slate-800 py-4 mb-6 mt-4">
+                                    <div className="flex justify-between items-center text-xl font-bold text-slate-900">
+                                        <span className="uppercase tracking-wider text-sm text-slate-500">Tổng thanh toán hóa đơn</span>
+                                        <span>{data.total_amount || '-'}</span>
+                                    </div>
+                                </div>
+
+                                <div className="mt-8 text-center text-slate-400 text-xs flex flex-col items-center">
+                                    <div className="w-full max-w-[200px] h-10 border-y-2 border-slate-800 flex flex-col justify-center mb-3 px-1 gap-0.5">
+                                        {/* Pure CSS Barcode Header */}
+                                        <div className="flex w-full h-8 justify-between opacity-80 items-end">
+                                            {[...Array(24)].map((_, i) => (
+                                                <div key={i} className={`bg-slate-800 ${i % 7 === 0 ? 'w-1.5 h-full' : i % 3 === 0 ? 'w-[3px] h-5' : i % 2 === 0 ? 'w-1 h-6' : 'w-[2px] h-full'}`}></div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <p className="tracking-widest">END OF RECEIPT</p>
+                                </div>
+                            </div>
+
+                            {/* Jagged Receipt Bottom Edge */}
+                            <div className="absolute bottom-0 left-0 w-full h-3 flex text-white fill-current rotate-180">
+                                {[...Array(24)].map((_, i) => (
+                                    <svg key={i} className="h-3 w-auto flex-1" viewBox="0 0 10 10" preserveAspectRatio="none">
+                                        <polygon points="0,0 10,0 5,10" />
+                                    </svg>
+                                ))}
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
         </div>
     );
 };
