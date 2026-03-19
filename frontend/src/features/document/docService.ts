@@ -82,14 +82,14 @@ export const exportJobsExcel = async (fileCode?: string): Promise<void> => {
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement('a');
     link.href = url;
-    
+
     // Format: IDP_Report_2026-03-15.xlsx
     const dateStr = new Date().toISOString().split('T')[0];
     link.setAttribute('download', `IDP_Report_${dateStr}.xlsx`);
-    
+
     document.body.appendChild(link);
     link.click();
-    
+
     // Cleanup
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
@@ -102,7 +102,13 @@ export const streamJobStatus = (
     onError: (err: Event) => void
 ): EventSource => {
     console.log(`[SSE] 🟢 Opening stream for Job ID: ${jobId}`);
-    const url = `http://localhost:8080/api/v1/jobs/${jobId}/stream`;
+
+    // Tự động nhận diện môi trường (VPS hay Local)
+    const baseUrl = (import.meta as any).env.VITE_API_BASE_URL
+        ? `${(import.meta as any).env.VITE_API_BASE_URL}/api/v1`
+        : 'http://localhost:8080/api/v1';
+
+    const url = `${baseUrl}/jobs/${jobId}/stream`;
     const source = new EventSource(url, { withCredentials: true });
 
     source.onopen = () => console.log(`[SSE] 🌐 Connection successfully opened for Job: ${jobId}`);
@@ -117,9 +123,9 @@ export const streamJobStatus = (
                 state: raw.state || raw.status,
             };
             console.log(`[SSE] 🧩 Parsed message for Job ${jobId}:`, data);
-            
+
             onMessage(data);
-            
+
             if (data.state === 'COMPLETED' || data.state === 'FAILED') {
                 console.log(`[SSE] 🛑 Terminal state reached (${data.state}) for Job ${jobId}. Closing internal stream.`);
                 source.close();
